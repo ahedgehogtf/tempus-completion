@@ -1,0 +1,18 @@
+{
+  "zone_info": {
+    "id": 1,
+    "map_id": 1,
+    "zoneindex": 1,
+    "custom_name": null,
+    "type": "map"
+  },
+  "tier_info": {
+    "3": 2,
+    "4": 2
+  },
+  "completion_info": {
+    "soldier": 9030,
+    "demoman": 2214
+  },
+  "result": null
+}

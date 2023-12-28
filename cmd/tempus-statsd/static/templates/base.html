@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang='en'>
+    <head>
+        <meta charset='utf-8'>
+        <title>{{template "title" .}}</title>
+      <style>
+        body {
+          box-sizing: border-box;
+          border: black;
+          height: 100%;
+          margin: 0;
+          padding: 2em;
+          background: pink;
+          font-family: sans-serif;
+          color: #330746;
+          line-height: 2;
+          min-width: 300px;
+        }
+
+        main {
+          box-sizing: border-box;
+          margin-left: auto;
+          margin-right: auto;
+          height: 100%;
+          width: 80%;
+          max-width: 1280px;
+          background: #F0E4D4;
+          border-radius: 0.5em;
+          // text-align: center;
+        }
+
+        header {
+          box-sizing: border-box;
+          margin-left: auto;
+          margin-right: auto;
+          height: 100%;
+          width: 80%;
+          max-width: 1280px;
+        }
+
+        a {
+          text-decoration: none;
+          color: #330746;
+          border-bottom-width: 1.5px;
+          border-bottom-style: dotted; 
+        }
+
+        a:hover {
+          border-bottom-style: solid;
+        }
+
+        ul {
+          list-style-type: none;
+        }
+
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+
+        input[type=number] {
+          -moz-appearance: textfield;
+        }
+
+      </style>
+      <link rel="icon" href="data:,">
+    </head>
+    <body>
+        <header>
+            <h1><a href='/'>Tempus Completion Stats</a></h1>
+        </header>
+        <main>
+            {{template "main" .}}
+        </main>
+        <footer style="padding-top: 15px;">
+          <center>Made by
+            <a href="https://steamcommunity.com/id/a-hedgehog/">
+            a hedgehog
+            </a>
+          </center>
+        </footer>
+    </body>
+</html>

@@ -1,0 +1,11 @@
+{{define "title"}}Home{{end}}
+
+{{define "main"}}
+    <center>
+    {{ range .Result.Players }}
+    <div>
+      <a href="/completions?playerid={{ .ID}}"> {{ .Name }} </a>
+      </div>
+    {{ end }}
+    </center>
+{{end}} 

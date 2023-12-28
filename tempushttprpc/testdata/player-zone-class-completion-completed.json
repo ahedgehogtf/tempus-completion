@@ -1,0 +1,43 @@
+{
+  "zone_info": {
+    "id": 5784,
+    "map_id": 439,
+    "zoneindex": 1,
+    "custom_name": null,
+    "type": "map"
+  },
+  "tier_info": {
+    "3": 2,
+    "4": 2
+  },
+  "completion_info": {
+    "soldier": 4813,
+    "demoman": 1553
+  },
+  "result": {
+    "zone_id": 5784,
+    "class": 3,
+    "demo_info": {
+      "id": 2642176,
+      "start_tick": 1003,
+      "end_tick": 10757,
+      "url": "https://demos-rolling.tempus2.xyz/8/f7/auto-20231218-005033-jump_cow.zip",
+      "server_info": {
+        "id": 8,
+        "name": "jump.tf (Chicago) Beginners"
+      }
+    },
+    "user_id": 59983,
+    "steamid": "STEAM_0:0:29372477",
+    "player_info": {
+      "id": 59983,
+      "steamid": "STEAM_0:0:29372477",
+      "name": "a hedgehog"
+    },
+    "id": 6800470,
+    "duration": 145.72499674279243,
+    "date": 1702860794.7925003,
+    "name": "a hedgehog",
+    "rank": 2445
+  }
+}

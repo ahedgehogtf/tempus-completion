@@ -1,0 +1,14 @@
+{{define "title"}}Home{{end}}
+
+{{define "main"}}
+    <center>
+      <div style="font-size: x-large;">
+        <form action="/completions">
+          <label style="text-align: right;">Enter your Player ID:</label>
+          <input style="border: 0; outline: 0; background: transparent; border-bottom: 1px solid #330746" type="number" id="playerid" name="playerid">
+          <input class="button" type="submit" value="Go">
+        </form>
+        </div>
+        <small>Don't know your ID? <a href="/player/search"> Search using your name </a></small>
+    </center>
+{{end}} 
