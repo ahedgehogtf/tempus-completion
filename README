@@ -1,0 +1,9 @@
+Tempus Completion
+--------------------
+
+
+To build, just run
+
+  go build ./...
+
+Requires a running rqlite instance
