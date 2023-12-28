@@ -111,6 +111,34 @@ func (a *mapClassAggregator) reset() {
 	}
 }
 
+type pointValueKey struct {
+	Tier     uint8
+	ZoneType tempushttp.ZoneType
+}
+
+var (
+	pointValues = map[pointValueKey]uint8{
+		{Tier: 1, ZoneType: tempushttp.ZoneTypeBonus}:  2,
+		{Tier: 2, ZoneType: tempushttp.ZoneTypeBonus}:  5,
+		{Tier: 3, ZoneType: tempushttp.ZoneTypeBonus}:  10,
+		{Tier: 4, ZoneType: tempushttp.ZoneTypeBonus}:  20,
+		{Tier: 5, ZoneType: tempushttp.ZoneTypeBonus}:  30,
+		{Tier: 6, ZoneType: tempushttp.ZoneTypeBonus}:  50,
+		{Tier: 1, ZoneType: tempushttp.ZoneTypeMap}:    10,
+		{Tier: 2, ZoneType: tempushttp.ZoneTypeMap}:    20,
+		{Tier: 3, ZoneType: tempushttp.ZoneTypeMap}:    30,
+		{Tier: 4, ZoneType: tempushttp.ZoneTypeMap}:    50,
+		{Tier: 5, ZoneType: tempushttp.ZoneTypeMap}:    100,
+		{Tier: 6, ZoneType: tempushttp.ZoneTypeMap}:    200,
+		{Tier: 1, ZoneType: tempushttp.ZoneTypeCourse}: 5,
+		{Tier: 2, ZoneType: tempushttp.ZoneTypeCourse}: 10,
+		{Tier: 3, ZoneType: tempushttp.ZoneTypeCourse}: 20,
+		{Tier: 4, ZoneType: tempushttp.ZoneTypeCourse}: 30,
+		{Tier: 5, ZoneType: tempushttp.ZoneTypeCourse}: 50,
+		{Tier: 6, ZoneType: tempushttp.ZoneTypeCourse}: 100,
+	}
+)
+
 func (a *mapClassAggregator) Aggregate(zones []completionstore.PlayerMapClassZoneCompletion) completionstore.PlayerClassMapStats {
 	a.reset()
 
