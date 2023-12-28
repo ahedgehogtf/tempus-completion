@@ -117,7 +117,7 @@ type pointValueKey struct {
 }
 
 var (
-	pointValues = map[pointValueKey]uint8{
+	pointValues = map[pointValueKey]uint16{
 		{Tier: 1, ZoneType: tempushttp.ZoneTypeBonus}:  2,
 		{Tier: 2, ZoneType: tempushttp.ZoneTypeBonus}:  5,
 		{Tier: 3, ZoneType: tempushttp.ZoneTypeBonus}:  10,
@@ -150,7 +150,12 @@ func (a *mapClassAggregator) Aggregate(zones []completionstore.PlayerMapClassZon
 		tiermask := completionstore.IntToMask(zone.Tier)
 		a.tiers = completionstore.Set(a.tiers, tiermask)
 
-		points := uint16(zone.Tier * 10)
+		k := pointValueKey{
+			Tier:     zone.Tier,
+			ZoneType: zone.ZoneType,
+		}
+		points := pointValues[k]
+
 		a.pointsTotal += points
 		a.tierPoints[zone.Tier-1] += points
 
