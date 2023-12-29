@@ -9,12 +9,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
 	"tempus-completion/cmd/tempus-completion-fetcher/completionstats"
 	"tempus-completion/cmd/tempus-completion-fetcher/completionstore"
 	"tempus-completion/cmd/tempus-completion-fetcher/rqlitecompletionstore"
 	"tempus-completion/tempushttp"
 	"tempus-completion/tempushttprpc"
-	"syscall"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -28,19 +28,27 @@ func main() {
 }
 
 type Store interface {
+	InsertMapStats(ctx context.Context, stats map[uint64]completionstore.MapStatsInfo) error
+	GetAllZoneClassInfo(ctx context.Context) ([]completionstore.ZoneClassInfo, error)
+	InsertZoneClassInfo(ctx context.Context, info []completionstore.ZoneClassInfo) error
+	SetPlayerMapsProcessed(ctx context.Context, maps []completionstore.StalePlayerMap) error
+	InsertPlayerMapStats(ctx context.Context, stats map[completionstore.PlayerMap]completionstore.PlayerMapStats) error
+	GetStalePlayerMaps(ctx context.Context) ([]completionstore.StalePlayerMap, error)
+	GetPlayerMapResults(ctx context.Context, playerMaps []completionstore.StalePlayerMap) (map[completionstore.PlayerMap][]completionstore.PlayerClassZoneResult, error)
+	SetZonesFetched(ctx context.Context, zones []completionstore.Zone, t time.Time) error
+	InsertPlayerClassZoneResults(ctx context.Context, results []completionstore.PlayerClassZoneResult) error
+	GetStaleZones(ctx context.Context, t time.Time) ([]completionstore.Zone, error)
+	InsertZones(ctx context.Context, zones map[completionstore.Zone]struct{}) error
 	InsertMaps(ctx context.Context, maps *completionstore.MapList) error
 	GetMaps(ctx context.Context) (*completionstore.MapList, error)
-	GetStalePlayers(ctx context.Context) ([]completionstore.Player, error)
-	GetStaleRawCompletions(ctx context.Context) (map[uint64]completionstore.RawPlayerCompletions, error)
-	InsertPlayerResults(ctx context.Context, results map[uint64][]completionstore.CompletionResult) error
-	InsertTransformedPlayerData(ctx context.Context, playerID uint64, data completionstore.TransformedPlayerData) error
 }
 
 type Fetcher struct {
 	client *tempushttprpc.Client
 	store  Store
 
-	maps *completionstore.MapList
+	maps  *completionstore.MapList
+	maps2 map[completionstore.MapClass]completionstore.MapClassStatsInfo
 
 	stdout io.Writer
 }
@@ -62,138 +70,254 @@ func (f *Fetcher) UpdateMaps(ctx context.Context) error {
 
 	f.maps = list
 
+	const estzones = 3000
+
+	zones := make(map[completionstore.Zone]struct{}, estzones)
+
+	for _, r := range response {
+		for i := 0; i < r.ZoneCounts.Bonus; i++ {
+			zone := completionstore.Zone{
+				MapID:     uint64(r.ID),
+				MapName:   r.Name,
+				ZoneType:  tempushttp.ZoneTypeBonus,
+				ZoneIndex: uint8(i + 1),
+			}
+
+			zones[zone] = struct{}{}
+		}
+
+		for i := 0; i < r.ZoneCounts.Map; i++ {
+			zone := completionstore.Zone{
+				MapID:     uint64(r.ID),
+				MapName:   r.Name,
+				ZoneType:  tempushttp.ZoneTypeMap,
+				ZoneIndex: uint8(i + 1),
+			}
+
+			zones[zone] = struct{}{}
+		}
+
+		for i := 0; i < r.ZoneCounts.Course; i++ {
+			zone := completionstore.Zone{
+				MapID:     uint64(r.ID),
+				MapName:   r.Name,
+				ZoneType:  tempushttp.ZoneTypeCourse,
+				ZoneIndex: uint8(i + 1),
+			}
+
+			zones[zone] = struct{}{}
+		}
+	}
+
+	if err := f.store.InsertZones(ctx, zones); err != nil {
+		return fmt.Errorf("insert zones: %w", err)
+	}
+
 	fmt.Fprintf(f.stdout, "inserted %d maps\n", len(response))
+
+	mapStats := make(map[uint64]completionstore.MapStatsInfo)
+
+	for mc, mapClassStats := range f.maps2 {
+		s := mapStats[mc.MapID]
+		s.MapName = mapClassStats.MapName
+
+		switch mc.Class {
+		case tempushttp.ClassTypeDemoman:
+			s.Stats.Demoman = completionstore.MapClassStats{
+				ZoneCount:       mapClassStats.Stats.ZoneCount,
+				PointsTotal:     mapClassStats.Stats.PointsTotal,
+				Tiers:           mapClassStats.Stats.Tiers,
+				TierPointsTotal: mapClassStats.Stats.TierPointsTotal,
+			}
+		case tempushttp.ClassTypeSoldier:
+			s.Stats.Soldier = completionstore.MapClassStats{
+				ZoneCount:       mapClassStats.Stats.ZoneCount,
+				PointsTotal:     mapClassStats.Stats.PointsTotal,
+				Tiers:           mapClassStats.Stats.Tiers,
+				TierPointsTotal: mapClassStats.Stats.TierPointsTotal,
+			}
+		}
+
+		mapStats[mc.MapID] = s
+	}
+
+	if err := f.store.InsertMapStats(ctx, mapStats); err != nil {
+		return fmt.Errorf("insert map stats: %w", err)
+	}
 
 	return nil
 }
 
-func (f *Fetcher) fetchCompletions(ctx context.Context, players []completionstore.Player) (map[uint64][]completionstore.CompletionResult, error) {
-	classes := [2]tempushttp.ClassType{
-		tempushttp.ClassTypeSoldier,
-		tempushttp.ClassTypeDemoman,
+func (f *Fetcher) Run(ctx context.Context) (bool, error) {
+	if time.Since(f.maps.Updated) > 24*time.Hour {
+		fmt.Fprintln(f.stdout, "maps data out-of-date, updating")
+
+		if err := f.UpdateMaps(ctx); err != nil {
+			return false, fmt.Errorf("update maps: %w", err)
+		}
 	}
 
-	estsize := len(players) * len(classes) * 714 * 6
+	ok, err := f.updateRawPlayerCompletionsNew(ctx)
+	if err != nil {
+		return false, fmt.Errorf("update raw player completions: %w", err)
+	}
 
-	in := make(chan tempushttprpc.GetPlayerZoneClassCompletionData, estsize)
-	out := make(chan completionstore.CompletionResult, estsize)
+	if ok {
+		return true, nil
+	}
+
+	ok, err = f.transformRawPlayerCompletionsNew(ctx)
+	if err != nil {
+		return false, fmt.Errorf("transform raw player completions: %w", err)
+	}
+
+	return ok, nil
+}
+
+type zoneResults struct {
+	Demoman            completionstore.ZoneClassInfo
+	Soldier            completionstore.ZoneClassInfo
+	PlayerClassResults []completionstore.PlayerClassZoneResult
+}
+
+func (f *Fetcher) fetchPlayerClassZoneResults(ctx context.Context, zones []completionstore.Zone) ([]zoneResults, error) {
+	estsize := len(zones)
+
+	in := make(chan completionstore.Zone, estsize)
+	out := make(chan zoneResults, estsize)
 	defer close(out)
 
 	g, ctx := errgroup.WithContext(ctx)
 
+	updated := time.Now()
+
 	for i := 0; i < 8; i++ {
 		g.Go(func() error {
 			for data := range in {
+				// change to 1 for fast zone refreshes
+				const limit = 0
+
 				ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-				response, err := f.client.GetPlayerZoneClassCompletion(ctx, data)
+				response, err := f.client.GetZoneRecords(ctx, data.MapID, data.ZoneType, data.ZoneIndex, limit)
 				cancel()
 
 				if err != nil {
-					return fmt.Errorf("get completion: %w", err)
+					return fmt.Errorf("get zone records: %w", err)
 				}
 
-				result := completionstore.CompletionResult{
-					PlayerID:  data.PlayerID,
-					MapName:   data.MapName,
-					ZoneType:  data.ZoneType,
-					ZoneIndex: data.ZoneIndex,
-					Class:     data.Class,
-					Response:  response,
+				ns := len(response.Results.Soldier)
+				nd := len(response.Results.Demoman)
+
+				if ns != response.CompletionInfo.Soldier {
+					fmt.Fprintf(f.stdout, "response expects %d soldier completions, found %d\n", response.CompletionInfo.Soldier, ns)
+
+					ns = response.CompletionInfo.Soldier
 				}
 
-				out <- result
+				if nd != response.CompletionInfo.Demoman {
+					fmt.Fprintf(f.stdout, "response expects %d demoman completions, found %d\n", response.CompletionInfo.Demoman, nd)
+
+					nd = response.CompletionInfo.Demoman
+				}
+
+				results := make([]completionstore.PlayerClassZoneResult, 0, ns+nd)
+
+				// fmt.Fprintf(f.stdout, "zone %s found %d records\n", data, ns+nd)
+				mapID := response.ZoneInfo.MapID
+				zoneType := tempushttp.ZoneType(response.ZoneInfo.Type)
+				zoneIndex := uint8(response.ZoneInfo.Zoneindex)
+				customName := response.ZoneInfo.CustomName
+
+				for _, r := range response.Results.Soldier {
+					result := completionstore.PlayerClassZoneResult{
+						MapID:       mapID,
+						ZoneType:    zoneType,
+						ZoneIndex:   zoneIndex,
+						PlayerID:    uint64(r.PlayerInfo.ID),
+						Class:       tempushttp.ClassTypeSoldier,
+						CustomName:  customName,
+						MapName:     data.MapName,
+						Tier:        uint8(response.TierInfo.Soldier),
+						Updated:     updated,
+						Rank:        uint32(r.Rank),
+						Duration:    time.Second * time.Duration(r.Duration),
+						Date:        time.Unix(int64(r.Date), 0),
+						Completions: uint32(ns),
+					}
+
+					results = append(results, result)
+				}
+
+				for _, r := range response.Results.Demoman {
+					result := completionstore.PlayerClassZoneResult{
+						MapID:       mapID,
+						ZoneType:    zoneType,
+						ZoneIndex:   zoneIndex,
+						PlayerID:    uint64(r.PlayerInfo.ID),
+						Class:       tempushttp.ClassTypeDemoman,
+						CustomName:  customName,
+						MapName:     data.MapName,
+						Tier:        uint8(response.TierInfo.Demoman),
+						Updated:     updated,
+						Rank:        uint32(r.Rank),
+						Duration:    time.Second * time.Duration(r.Duration),
+						Date:        time.Unix(int64(r.Date), 0),
+						Completions: uint32(nd),
+					}
+
+					results = append(results, result)
+				}
+
+				zr := zoneResults{
+					Demoman: completionstore.ZoneClassInfo{
+						MapID:       mapID,
+						MapName:     data.MapName,
+						ZoneType:    zoneType,
+						ZoneIndex:   zoneIndex,
+						Class:       tempushttp.ClassTypeDemoman,
+						CustomName:  customName,
+						Tier:        uint8(response.TierInfo.Demoman),
+						Completions: uint32(nd),
+					},
+					Soldier: completionstore.ZoneClassInfo{
+						MapID:       mapID,
+						MapName:     data.MapName,
+						ZoneType:    zoneType,
+						ZoneIndex:   zoneIndex,
+						Class:       tempushttp.ClassTypeSoldier,
+						CustomName:  customName,
+						Tier:        uint8(response.TierInfo.Soldier),
+						Completions: uint32(ns),
+					},
+					PlayerClassResults: results,
+				}
+
+				out <- zr
 			}
 
 			return nil
 		})
 	}
 
-	var count uint16
-
 	start := time.Now()
-
-	for _, c := range classes {
-	maploop:
-		for _, m := range f.maps.Response {
-			switch c {
-			case tempushttp.ClassTypeDemoman:
-				if m.TierInfo.Demoman == 0 {
-					continue maploop
-				}
-			case tempushttp.ClassTypeSoldier:
-				if m.TierInfo.Soldier == 0 {
-					continue maploop
-				}
-			}
-
-			for _, p := range players {
-				for i := 0; i < m.ZoneCounts.Bonus; i++ {
-					data := tempushttprpc.GetPlayerZoneClassCompletionData{
-						MapName:   m.Name,
-						ZoneType:  tempushttp.ZoneTypeBonus,
-						ZoneIndex: uint8(i + 1),
-						PlayerID:  p.PlayerID,
-						Class:     c,
-					}
-
-					in <- data
-					count++
-				}
-
-				for i := 0; i < m.ZoneCounts.Map; i++ {
-					data := tempushttprpc.GetPlayerZoneClassCompletionData{
-						MapName:   m.Name,
-						ZoneType:  tempushttp.ZoneTypeMap,
-						ZoneIndex: uint8(i + 1),
-						PlayerID:  p.PlayerID,
-						Class:     c,
-					}
-
-					in <- data
-					count++
-				}
-
-				for i := 0; i < m.ZoneCounts.Course; i++ {
-					data := tempushttprpc.GetPlayerZoneClassCompletionData{
-						MapName:   m.Name,
-						ZoneType:  tempushttp.ZoneTypeCourse,
-						ZoneIndex: uint8(i + 1),
-						PlayerID:  p.PlayerID,
-						Class:     c,
-					}
-
-					in <- data
-					count++
-				}
-			}
-		}
+	for _, z := range zones {
+		in <- z
 	}
-	fmt.Fprintf(f.stdout, "fetching %d completions\n", count)
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
 	done := ctx.Done()
 
-	completions := make(map[uint64][]completionstore.CompletionResult, len(players))
+	results := make([]zoneResults, 0, len(zones))
 
-	for i := uint16(0); i < count; i++ {
-		if i%50 == 0 {
-			fmt.Fprintf(f.stdout, "processed %d completions\n", i)
-		}
-
+loop:
+	for i := 0; i < len(zones); i++ {
 		select {
 		case <-done:
-			return nil, ctx.Err()
+			break loop
 		case r := <-out:
-
-			responses, ok := completions[r.PlayerID]
-			if !ok {
-				responses = make([]completionstore.CompletionResult, 0, 1200)
-			}
-
-			responses = append(responses, r)
-			completions[r.PlayerID] = responses
+			results = append(results, r)
 		}
 	}
 
@@ -205,75 +329,100 @@ func (f *Fetcher) fetchCompletions(ctx context.Context, players []completionstor
 
 	elapsed := time.Since(start)
 
-	fmt.Fprintf(f.stdout, "found %d completions in %s seconds\n", count, elapsed)
+	fmt.Fprintf(f.stdout, "found %d results in %s seconds\n", len(results), elapsed)
 
-	return completions, nil
+	return results, nil
 }
 
-func (f *Fetcher) Run(ctx context.Context) error {
-	if time.Since(f.maps.Updated) > 24*time.Hour {
-		fmt.Fprintln(f.stdout, "maps data out-of-date, updating")
+func (f *Fetcher) updateRawPlayerCompletionsNew(ctx context.Context) (bool, error) {
+	now := time.Now()
 
-		if err := f.UpdateMaps(ctx); err != nil {
-			return fmt.Errorf("update maps: %w", err)
-		}
+	threshold := now.Add(-1 * (24 * time.Hour))
+
+	zones, err := f.store.GetStaleZones(ctx, threshold)
+	if err != nil {
+		return false, fmt.Errorf("get stale zones: %w", err)
 	}
 
-	fmt.Fprintln(f.stdout, "updating raw player completions")
+	fmt.Fprintf(f.stdout, "found %d stale zones\n", len(zones))
 
-	if err := f.updateRawPlayerCompletions(ctx); err != nil {
-		return fmt.Errorf("update raw player completions: %w", err)
+	if len(zones) == 0 {
+		return false, nil
 	}
 
-	fmt.Fprintln(f.stdout, "finished updating raw player completions")
-
-	if err := f.transformRawPlayerCompletions(ctx); err != nil {
-		return fmt.Errorf("transform raw player completions: %w", err)
+	zoneResults, err := f.fetchPlayerClassZoneResults(ctx, zones)
+	if err != nil {
+		return false, fmt.Errorf("fetch player class zone results: %w", err)
 	}
 
-	return nil
+	if len(zoneResults) == 0 {
+		return false, nil
+	}
+
+	results := make([]completionstore.PlayerClassZoneResult, 0, len(zoneResults)*5000)
+	info := make([]completionstore.ZoneClassInfo, 0, len(zoneResults)*2)
+
+	for _, r := range zoneResults {
+		results = append(results, r.PlayerClassResults...)
+		info = append(info, r.Demoman, r.Soldier)
+	}
+
+	if err := f.store.InsertPlayerClassZoneResults(ctx, results); err != nil {
+		return false, fmt.Errorf("insert player class zone results: %w", err)
+	}
+
+	if err := f.store.InsertZoneClassInfo(ctx, info); err != nil {
+		return false, fmt.Errorf("insert zone info: %w", err)
+	}
+
+	if err := f.store.SetZonesFetched(ctx, zones, now); err != nil {
+		return false, fmt.Errorf("set zones fetched: %w", err)
+	}
+
+	// TODO incremental update
+	zoneClassInfo, err := f.store.GetAllZoneClassInfo(ctx)
+	if err != nil {
+		return false, fmt.Errorf("get all zone class info: %w", err)
+	}
+
+	f.maps2 = completionstats.AggregateMapStats(zoneClassInfo)
+
+	return true, nil
 }
 
-func (f *Fetcher) updateRawPlayerCompletions(ctx context.Context) error {
-	players, err := f.store.GetStalePlayers(ctx)
+func (f *Fetcher) transformRawPlayerCompletionsNew(ctx context.Context) (bool, error) {
+	stalePlayerMaps, err := f.store.GetStalePlayerMaps(ctx)
 	if err != nil {
-		return fmt.Errorf("get stale players: %w", err)
+		return false, fmt.Errorf("get stale player maps: %w", err)
 	}
 
-	fmt.Fprintf(f.stdout, "found %d stale players\n", len(players))
+	fmt.Fprintf(f.stdout, "found %d stale player maps\n", len(stalePlayerMaps))
 
-	if len(players) == 0 {
-		return nil
+	if len(stalePlayerMaps) == 0 {
+		return false, nil
 	}
 
-	completions, err := f.fetchCompletions(ctx, players)
+	results, err := f.store.GetPlayerMapResults(ctx, stalePlayerMaps)
 	if err != nil {
-		return fmt.Errorf("fetch completions: %w", err)
+		return false, fmt.Errorf("get player map results: %w", err)
 	}
 
-	if err := f.store.InsertPlayerResults(ctx, completions); err != nil {
-		return fmt.Errorf("insert player completions: %w", err)
+	calculator := completionstats.MapStatCalculator{
+		PlayerMapResults:  results,
+		MapClassStatsInfo: f.maps2,
 	}
 
-	return nil
-}
+	stats := calculator.Calculate()
 
-func (f *Fetcher) transformRawPlayerCompletions(ctx context.Context) error {
-	rawPlayerCompletions, err := f.store.GetStaleRawCompletions(ctx)
-	if err != nil {
-		return fmt.Errorf("get stale raw completions: %w", err)
+	if err := f.store.InsertPlayerMapStats(ctx, stats); err != nil {
+		return false, fmt.Errorf("insert player map stats: %w", err)
 	}
 
-	fmt.Fprintf(f.stdout, "found %d stale raw players\n", len(rawPlayerCompletions))
-
-	for playerID, completions := range rawPlayerCompletions {
-		data := completionstats.ParsePlayer(completions)
-		if err := f.store.InsertTransformedPlayerData(ctx, playerID, data); err != nil {
-			return fmt.Errorf("insert transformed data: %w", err)
-		}
+	if err := f.store.SetPlayerMapsProcessed(ctx, stalePlayerMaps); err != nil {
+		return false, fmt.Errorf("set player maps processed: %w", err)
 	}
 
-	return nil
+	return true, nil
 }
 
 func run(args []string, stdout, stderr io.Writer) error {
@@ -322,10 +471,16 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("get maps: %w", err)
 	}
 
+	zoneClassInfo, err := store.GetAllZoneClassInfo(ctx)
+	if err != nil {
+		return fmt.Errorf("get all zone class info: %w", err)
+	}
+
 	f := &Fetcher{
 		client: client,
 		store:  store,
 		maps:   list,
+		maps2:  completionstats.AggregateMapStats(zoneClassInfo),
 		stdout: stdout,
 	}
 
@@ -344,7 +499,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		case <-timer.C:
 			fmt.Fprintf(stdout, "running iteration %d\n", i)
 
-			if err := f.Run(ctx); err != nil {
+			ok, err := f.Run(ctx)
+			if err != nil {
 				fmt.Fprintf(stdout, "error during iteration: %s\n", err)
 				retries++
 				timer.Reset(sleep * time.Duration(retries+1))
@@ -353,9 +509,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 			retries = 0
 
-			fmt.Fprintf(stdout, "finished iteration %d, sleeping\n", i)
+			fmt.Fprintf(stdout, "finished iteration %d\n", i)
 
-			timer.Reset(sleep)
+			if ok {
+				timer.Reset(0)
+			} else {
+				timer.Reset(sleep)
+			}
 		}
 	}
 }

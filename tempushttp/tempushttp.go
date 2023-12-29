@@ -59,23 +59,23 @@ const (
 )
 
 type GetPlayerZoneClassCompletionResponse struct {
-	ZoneInfo       PlayerZoneClassCompletionZoneInfo       `json:"zone_info"`
-	TierInfo       PlayerZoneClassCompletionTierInfo       `json:"tier_info"`
-	CompletionInfo PlayerZoneClassCompletionCompletionInfo `json:"completion_info"`
-	Result         PlayerZoneClassCompletionResult         `json:"result"`
+	ZoneInfo       ZoneInfo         `json:"zone_info"`
+	TierInfo       TierInfo         `json:"tier_info"`
+	CompletionInfo CompletionInfo   `json:"completion_info"`
+	Result         CompletionResult `json:"result"`
 }
-type PlayerZoneClassCompletionZoneInfo struct {
+type ZoneInfo struct {
 	ID         int    `json:"id"`
 	MapID      uint64 `json:"map_id"`
 	Zoneindex  int    `json:"zoneindex"`
 	CustomName string `json:"custom_name"`
 	Type       string `json:"type"`
 }
-type PlayerZoneClassCompletionTierInfo struct {
+type TierInfo struct {
 	Soldier int `json:"3"`
 	Demoman int `json:"4"`
 }
-type PlayerZoneClassCompletionCompletionInfo struct {
+type CompletionInfo struct {
 	Soldier int `json:"soldier"`
 	Demoman int `json:"demoman"`
 }
@@ -96,7 +96,8 @@ type PlayerZoneClassCompletionPlayerInfo struct {
 	Steamid string `json:"steamid"`
 	Name    string `json:"name"`
 }
-type PlayerZoneClassCompletionResult struct {
+
+type CompletionResult struct {
 	ZoneID     int                                 `json:"zone_id"`
 	Class      int                                 `json:"class"`
 	DemoInfo   PlayerZoneClassCompletionDemoInfo   `json:"demo_info"`
@@ -124,4 +125,16 @@ type PlayersAndMapsSearchPlayer struct {
 type PlayersAndMapsSearchMap struct {
 	ID   uint64 `json:"id"`
 	Name string `json:"name"`
+}
+
+type ZoneRecordsResults struct {
+	Soldier []CompletionResult `json:"soldier"`
+	Demoman []CompletionResult `json:"demoman"`
+}
+
+type ZoneRecordsResponse struct {
+	ZoneInfo       ZoneInfo           `json:"zone_info"`
+	TierInfo       TierInfo           `json:"tier_info"`
+	CompletionInfo CompletionInfo     `json:"completion_info"`
+	Results        ZoneRecordsResults `json:"results"`
 }

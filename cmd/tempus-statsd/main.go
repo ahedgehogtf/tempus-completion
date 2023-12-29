@@ -18,7 +18,6 @@ import (
 	"tempus-completion/cmd/tempus-statsd/templateutil"
 	"tempus-completion/tempushttp"
 	"tempus-completion/tempushttprpc"
-	"time"
 )
 
 func main() {
@@ -85,8 +84,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 type Store interface {
 	GetPlayerMapZones(ctx context.Context, playerID, mapID uint64) (*completionstore.MapZones, bool, error)
-	GetCompletions(ctx context.Context, playerid uint64) ([]completionstore.PlayerMapStats, bool, error)
-	GetPlayerFetchTime(ctx context.Context, playerID uint64) (time.Time, bool, error)
+	GetCompletions(ctx context.Context, playerid uint64) (map[uint64]completionstore.PlayerMapStats, bool, error)
 }
 
 type Handler struct {
@@ -99,44 +97,6 @@ var (
 	//go:embed static/*
 	staticFS embed.FS
 )
-
-func (h *Handler) serveRequestPlayerPage(w http.ResponseWriter, r *http.Request) error {
-	q := r.URL.Query()
-
-	pid := q.Get("playerid")
-	if pid == "" {
-		return httpserveutil.BadRequest(w, "must specify a Player ID")
-	}
-
-	playerID, err := strconv.ParseUint(pid, 10, 64)
-	if err != nil {
-		return httpserveutil.BadRequest(w, "malformed playerID: %w", err)
-	}
-
-	ctx := r.Context()
-	t, ok, err := h.store.GetPlayerFetchTime(ctx, playerID)
-	if err != nil {
-		return httpserveutil.InternalError(w, "get player fetch time: %w", err)
-	}
-
-	type pageData struct {
-		PlayerID     uint64
-		Fetched      time.Time
-		PlayerExists bool
-	}
-
-	d := pageData{
-		PlayerID:     playerID,
-		Fetched:      t,
-		PlayerExists: ok,
-	}
-
-	if err := h.templates.request.Execute(w, d); err != nil {
-		return fmt.Errorf("execute template: %w", err)
-	}
-
-	return nil
-}
 
 func (h *Handler) serveIndexPage(w http.ResponseWriter, r *http.Request) error {
 	if err := h.templates.index.Execute(w, nil); err != nil {
@@ -212,6 +172,8 @@ func (h *Handler) serveMapPage(w http.ResponseWriter, r *http.Request) error {
 		if err := h.templates.index.Execute(w, nil); err != nil {
 			return fmt.Errorf("execute template: %w", err)
 		}
+
+		return nil
 	}
 
 	type pageData struct {
@@ -360,6 +322,58 @@ func SortMapNameDescending(stats []completionstore.PlayerMapStats) {
 		return stats[i].MapName > stats[j].MapName
 	})
 }
+func SortSoldierCompletionDescending(stats []completionstore.PlayerMapStats) {
+	sort.SliceStable(stats, func(i, j int) bool {
+		return stats[i].Soldier.TotalCompletionPercentage > stats[j].Soldier.TotalCompletionPercentage
+	})
+}
+
+func SortSoldierCompletionAscending(stats []completionstore.PlayerMapStats) {
+	sort.SliceStable(stats, func(i, j int) bool {
+		return stats[i].Soldier.TotalCompletionPercentage < stats[j].Soldier.TotalCompletionPercentage
+	})
+}
+func SortDemomanCompletionDescending(stats []completionstore.PlayerMapStats) {
+	sort.SliceStable(stats, func(i, j int) bool {
+		return stats[i].Demoman.TotalCompletionPercentage > stats[j].Demoman.TotalCompletionPercentage
+	})
+}
+
+func SortDemomanCompletionAscending(stats []completionstore.PlayerMapStats) {
+	sort.SliceStable(stats, func(i, j int) bool {
+		return stats[i].Demoman.TotalCompletionPercentage < stats[j].Demoman.TotalCompletionPercentage
+	})
+}
+
+func SortBothCompletionDescending(stats []completionstore.PlayerMapStats) {
+	sort.SliceStable(stats, func(i, j int) bool {
+		d0 := stats[i].Demoman.TotalCompletionPercentage
+		d1 := stats[j].Demoman.TotalCompletionPercentage
+		s0 := stats[i].Soldier.TotalCompletionPercentage
+		s1 := stats[j].Soldier.TotalCompletionPercentage
+
+		return max(d0, s0) > max(d1, s1)
+	})
+}
+
+func max(a, b uint8) uint8 {
+	if a > b {
+		return a
+	}
+
+	return b
+}
+
+func SortBothCompletionAscending(stats []completionstore.PlayerMapStats) {
+	sort.SliceStable(stats, func(i, j int) bool {
+		d0 := stats[i].Demoman.TotalCompletionPercentage
+		d1 := stats[j].Demoman.TotalCompletionPercentage
+		s0 := stats[i].Soldier.TotalCompletionPercentage
+		s1 := stats[j].Soldier.TotalCompletionPercentage
+
+		return max(d0, s0) < max(d1, s1)
+	})
+}
 
 type sortFuncsKey struct {
 	sortType      string
@@ -369,24 +383,48 @@ type sortFuncsKey struct {
 
 var (
 	sortFuncs = map[sortFuncsKey]SortFunc{
-		{sortType: "tier-ascending", class: "both", hideCompleted: false}:         SortBothTierAscendingAll,
-		{sortType: "tier-ascending", class: "both", hideCompleted: true}:          SortBothTierAscendingIncomplete,
-		{sortType: "tier-ascending", class: "soldier", hideCompleted: false}:      SortSoldierTierAscendingAll,
-		{sortType: "tier-ascending", class: "soldier", hideCompleted: true}:       SortSoldierTierAscendingIncomplete,
-		{sortType: "tier-ascending", class: "demoman", hideCompleted: false}:      SortDemomanTierAscendingAll,
-		{sortType: "tier-ascending", class: "demoman", hideCompleted: true}:       SortDemomanTierAscendingIncomplete,
-		{sortType: "tier-descending", class: "both", hideCompleted: false}:        SortBothTierDescendingAll,
-		{sortType: "tier-descending", class: "both", hideCompleted: true}:         SortBothTierDescendingIncomplete,
-		{sortType: "tier-descending", class: "soldier", hideCompleted: false}:     SortSoldierTierDescendingAll,
-		{sortType: "tier-descending", class: "soldier", hideCompleted: true}:      SortSoldierTierDescendingIncomplete,
-		{sortType: "tier-descending", class: "demoman", hideCompleted: false}:     SortDemomanTierDescendingAll,
-		{sortType: "tier-descending", class: "demoman", hideCompleted: true}:      SortDemomanTierDescendingIncomplete,
-		{sortType: "map-name-descending", class: "both", hideCompleted: false}:    SortMapNameDescending,
-		{sortType: "map-name-descending", class: "both", hideCompleted: true}:     SortMapNameDescending,
-		{sortType: "map-name-descending", class: "soldier", hideCompleted: false}: SortMapNameDescending,
-		{sortType: "map-name-descending", class: "soldier", hideCompleted: true}:  SortMapNameDescending,
-		{sortType: "map-name-descending", class: "demoman", hideCompleted: false}: SortMapNameDescending,
-		{sortType: "map-name-descending", class: "demoman", hideCompleted: true}:  SortMapNameDescending,
+		{sortType: "tier-ascending", class: "both", hideCompleted: false}:           SortBothTierAscendingAll,
+		{sortType: "tier-ascending", class: "both", hideCompleted: true}:            SortBothTierAscendingIncomplete,
+		{sortType: "tier-ascending", class: "soldier", hideCompleted: false}:        SortSoldierTierAscendingAll,
+		{sortType: "tier-ascending", class: "soldier", hideCompleted: true}:         SortSoldierTierAscendingIncomplete,
+		{sortType: "tier-ascending", class: "demoman", hideCompleted: false}:        SortDemomanTierAscendingAll,
+		{sortType: "tier-ascending", class: "demoman", hideCompleted: true}:         SortDemomanTierAscendingIncomplete,
+		{sortType: "tier-descending", class: "both", hideCompleted: false}:          SortBothTierDescendingAll,
+		{sortType: "tier-descending", class: "both", hideCompleted: true}:           SortBothTierDescendingIncomplete,
+		{sortType: "tier-descending", class: "soldier", hideCompleted: false}:       SortSoldierTierDescendingAll,
+		{sortType: "tier-descending", class: "soldier", hideCompleted: true}:        SortSoldierTierDescendingIncomplete,
+		{sortType: "tier-descending", class: "demoman", hideCompleted: false}:       SortDemomanTierDescendingAll,
+		{sortType: "tier-descending", class: "demoman", hideCompleted: true}:        SortDemomanTierDescendingIncomplete,
+		{sortType: "map-name-descending", class: "both", hideCompleted: false}:      SortMapNameDescending,
+		{sortType: "map-name-descending", class: "both", hideCompleted: true}:       SortMapNameDescending,
+		{sortType: "map-name-descending", class: "soldier", hideCompleted: false}:   SortMapNameDescending,
+		{sortType: "map-name-descending", class: "soldier", hideCompleted: true}:    SortMapNameDescending,
+		{sortType: "map-name-descending", class: "demoman", hideCompleted: false}:   SortMapNameDescending,
+		{sortType: "map-name-descending", class: "demoman", hideCompleted: true}:    SortMapNameDescending,
+		{sortType: "map-name-ascending", class: "both", hideCompleted: false}:       SortMapNameAscending,
+		{sortType: "map-name-ascending", class: "both", hideCompleted: true}:        SortMapNameAscending,
+		{sortType: "map-name-ascending", class: "soldier", hideCompleted: false}:    SortMapNameAscending,
+		{sortType: "map-name-ascending", class: "soldier", hideCompleted: true}:     SortMapNameAscending,
+		{sortType: "map-name-ascending", class: "demoman", hideCompleted: false}:    SortMapNameAscending,
+		{sortType: "map-name-ascending", class: "demoman", hideCompleted: true}:     SortMapNameAscending,
+		{sortType: "", class: "both", hideCompleted: false}:                         SortMapNameAscending,
+		{sortType: "", class: "both", hideCompleted: true}:                          SortMapNameAscending,
+		{sortType: "", class: "soldier", hideCompleted: false}:                      SortMapNameAscending,
+		{sortType: "", class: "soldier", hideCompleted: true}:                       SortMapNameAscending,
+		{sortType: "", class: "demoman", hideCompleted: false}:                      SortMapNameAscending,
+		{sortType: "", class: "demoman", hideCompleted: true}:                       SortMapNameAscending,
+		{sortType: "completion-ascending", class: "both", hideCompleted: false}:     SortBothCompletionAscending,
+		{sortType: "completion-ascending", class: "both", hideCompleted: true}:      SortBothCompletionAscending,
+		{sortType: "completion-ascending", class: "soldier", hideCompleted: false}:  SortSoldierCompletionAscending,
+		{sortType: "completion-ascending", class: "soldier", hideCompleted: true}:   SortSoldierCompletionAscending,
+		{sortType: "completion-ascending", class: "demoman", hideCompleted: false}:  SortDemomanCompletionAscending,
+		{sortType: "completion-ascending", class: "demoman", hideCompleted: true}:   SortDemomanCompletionAscending,
+		{sortType: "completion-descending", class: "both", hideCompleted: false}:    SortBothCompletionDescending,
+		{sortType: "completion-descending", class: "both", hideCompleted: true}:     SortBothCompletionDescending,
+		{sortType: "completion-descending", class: "soldier", hideCompleted: false}: SortSoldierCompletionDescending,
+		{sortType: "completion-descending", class: "soldier", hideCompleted: true}:  SortSoldierCompletionDescending,
+		{sortType: "completion-descending", class: "demoman", hideCompleted: false}: SortDemomanCompletionDescending,
+		{sortType: "completion-descending", class: "demoman", hideCompleted: true}:  SortDemomanCompletionDescending,
 	}
 )
 
@@ -519,7 +557,7 @@ func (h *Handler) serveCompletionsPage(w http.ResponseWriter, r *http.Request) e
 	}
 
 	if !ok {
-		return httpserveutil.NotFound(w, "Your player ID is not supported yet; check back in the future when we allow ID requests")
+		return httpserveutil.NotFound(w, "Your player ID was not found; for now you must submit a record before we can show you completions!")
 	}
 
 	filtered := make([]completionstore.PlayerMapStats, 0, len(stats))
@@ -538,10 +576,6 @@ loop:
 	if sf, ok := sortFuncs[sfk]; ok {
 		sf(filtered)
 	}
-
-	// if sorter != nil {
-	// 	sorter(filtered)
-	// }
 
 	type pageData struct {
 		PlayerCompletions []completionstore.PlayerMapStats
@@ -567,7 +601,6 @@ func (h *Handler) Routes(out io.Writer) map[string]http.Handler {
 		"/":               httpserveutil.Handle(out, h.serveIndexPage),
 		"/completions":    httpserveutil.Handle(out, h.serveCompletionsPage),
 		"/map":            httpserveutil.Handle(out, h.serveMapPage),
-		"/request":        httpserveutil.Handle(out, h.serveRequestPlayerPage),
 		"/player/search":  httpserveutil.Handle(out, h.serveSearchPage),
 		"/player/results": httpserveutil.Handle(out, h.serveResultsPage),
 	}
@@ -598,7 +631,6 @@ type PageTemplates struct {
 	index       *template.Template
 	completions *template.Template
 	classmap    *template.Template
-	request     *template.Template
 	search      *template.Template
 	results     *template.Template
 }
@@ -627,13 +659,6 @@ func parseTemplates() (PageTemplates, error) {
 				"static/templates/pages/class-map.html",
 			},
 			Add: func(t *template.Template) { pt.classmap = t },
-		},
-		{
-			Files: []string{
-				"static/templates/base.html",
-				"static/templates/pages/request.html",
-			},
-			Add: func(t *template.Template) { pt.request = t },
 		},
 		{
 			Files: []string{

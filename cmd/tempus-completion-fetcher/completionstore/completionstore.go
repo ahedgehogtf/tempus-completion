@@ -6,23 +6,11 @@ import (
 	"time"
 )
 
-type Player struct {
-	PlayerID uint64
-}
-
-type RawPlayerCompletions struct {
-	PlayerID uint64
-	Updated  time.Time
-	Results  []CompletionResult
-}
-
-type CompletionResult struct {
-	PlayerID  uint64                                           `json:"player_id"`
-	MapName   string                                           `json:"map_name"`
-	ZoneType  tempushttp.ZoneType                              `json:"zone_type"`
-	ZoneIndex uint8                                            `json:"zone_index"`
-	Class     tempushttp.ClassType                             `json:"class_type"`
-	Response  *tempushttp.GetPlayerZoneClassCompletionResponse `json:"response"`
+type Zone struct {
+	MapName   string
+	MapID     uint64
+	ZoneType  tempushttp.ZoneType
+	ZoneIndex uint8
 }
 
 type MapList struct {
@@ -42,12 +30,6 @@ type PlayerMapClassZoneCompletion struct {
 	Demo        string              `json:"demo"`
 	StartTick   uint64              `json:"start_tick"`
 	EndTick     uint64              `json:"end_tick"`
-}
-
-type PlayerMapAggregation struct {
-	PlayerID uint64
-	Fetched  time.Time
-	Stats    []PlayerMapStats
 }
 
 type PlayerMapStats struct {
@@ -91,6 +73,16 @@ func Set(b, flag Bitmask) Bitmask {
 	return b | flag
 }
 
+type StalePlayerMap struct {
+	PlayerMap
+	LatestUpdate time.Time
+}
+
+type PlayerMap struct {
+	PlayerID uint64
+	MapID    uint64
+}
+
 type PlayerClassMapStats struct {
 	TotalCompletionPercentage uint8     `json:"total_completion_percentage"`
 	PointCompletionPercentage uint8     `json:"point_completion_percentage"`
@@ -100,13 +92,62 @@ type PlayerClassMapStats struct {
 	PointsAvailableByTier     [6]uint16 `json:"points_available_by_tier"`
 }
 
-type TransformedPlayerData struct {
-	Maps     PlayerMapAggregation
-	MapZones map[uint64]MapZones
-}
-
 type MapZones struct {
 	MapName string                         `json:"map_name"`
 	Soldier []PlayerMapClassZoneCompletion `json:"soldier"`
 	Demoman []PlayerMapClassZoneCompletion `json:"demoman"`
+}
+
+type PlayerClassZoneResult struct {
+	MapID       uint64
+	ZoneType    tempushttp.ZoneType
+	ZoneIndex   uint8
+	PlayerID    uint64
+	Class       tempushttp.ClassType
+	CustomName  string
+	MapName     string
+	Tier        uint8
+	Updated     time.Time
+	Rank        uint32
+	Duration    time.Duration
+	Date        time.Time
+	Completions uint32
+}
+
+type MapClass struct {
+	MapID uint64
+	Class tempushttp.ClassType
+}
+
+type MapClassStats struct {
+	ZoneCount       uint8     `json:"zone_count"`
+	PointsTotal     uint16    `json:"points_total"`
+	Tiers           Bitmask   `json:"tiers"`
+	TierPointsTotal [6]uint16 `json:"tier_points_total"`
+}
+
+type ZoneClassInfo struct {
+	MapID       uint64
+	ZoneType    tempushttp.ZoneType
+	ZoneIndex   uint8
+	Class       tempushttp.ClassType
+	MapName     string
+	CustomName  string
+	Tier        uint8
+	Completions uint32
+}
+
+type MapClassStatsInfo struct {
+	MapName string
+	Stats   MapClassStats
+}
+
+type MapStatsInfo struct {
+	MapName string
+	Stats   MapStats
+}
+
+type MapStats struct {
+	Demoman MapClassStats `json:"demoman"`
+	Soldier MapClassStats `json:"soldier"`
 }

@@ -4,15 +4,29 @@
         <meta charset='utf-8'>
         <title>{{template "title" .}}</title>
       <style>
+        :root {
+          --text-color: #330746;
+          --background-color: pink;
+          --main-color: #F0E4D4;
+        }
+
+        @media (prefers-color-scheme: dark) {
+          :root {
+            --text-color: #7b8897;
+            --background-color: #22272e;
+            --main-color: #2d333b;
+          }
+        }
+
         body {
           box-sizing: border-box;
           border: black;
           height: 100%;
           margin: 0;
           padding: 2em;
-          background: pink;
+          background: var(--background-color);
           font-family: sans-serif;
-          color: #330746;
+          color: var(--text-color);
           line-height: 2;
           min-width: 300px;
         }
@@ -24,9 +38,8 @@
           height: 100%;
           width: 80%;
           max-width: 1280px;
-          background: #F0E4D4;
+          background: var(--main-color);
           border-radius: 0.5em;
-          // text-align: center;
         }
 
         header {
@@ -40,7 +53,7 @@
 
         a {
           text-decoration: none;
-          color: #330746;
+          color: var(--text-color);
           border-bottom-width: 1.5px;
           border-bottom-style: dotted; 
         }
@@ -61,6 +74,10 @@
 
         input[type=number] {
           -moz-appearance: textfield;
+        }
+
+        input {
+          color: var(--text-color);
         }
 
       </style>

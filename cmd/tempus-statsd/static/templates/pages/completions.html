@@ -50,6 +50,8 @@
     <option {{ if eq .Filters.Sort "map-name-descending" }} selected {{end}} value="map-name-descending">Name (Z-A)</option>
     <option value="tier-ascending" {{ if eq .Filters.Sort "tier-ascending" }} selected {{end}} >Lowest tier</option>
     <option {{ if eq .Filters.Sort "tier-descending" }} selected {{end}} value="tier-descending">Highest tier</option>
+    <option value="completion-ascending" {{ if eq .Filters.Sort "completion-ascending" }} selected {{end}} >Lowest completion</option>
+    <option {{ if eq .Filters.Sort "completion-descending" }} selected {{end}} value="completion-descending">Highest completion</option>
   </select>
 </fieldset>
 <fieldset>

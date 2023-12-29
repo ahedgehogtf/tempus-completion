@@ -96,6 +96,41 @@ func (c *Client) GetDetailedMapList(ctx context.Context) (tempushttp.GetDetailed
 	return response, nil
 }
 
+func (c *Client) GetZoneRecords(ctx context.Context, mapID uint64, zoneType tempushttp.ZoneType, zoneIndex uint8, limit uint32) (*tempushttp.ZoneRecordsResponse, error) {
+	addr := fmt.Sprintf("%s/maps/id/%d/zones/typeindex/%s/%d/records/list?limit=%d", c.address, mapID, zoneType, zoneIndex, limit)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, addr, nil)
+	if err != nil {
+		return nil, fmt.Errorf("new request: %w", err)
+	}
+
+	res, err := c.httpc.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("do request: %w", err)
+	}
+
+	defer res.Body.Close()
+
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %d: %s", res.StatusCode, string(b))
+	}
+
+	var response tempushttp.ZoneRecordsResponse
+
+	decoder := json.NewDecoder(bytes.NewReader(b))
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&response); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	return &response, nil
+}
+
 type GetPlayerZoneClassCompletionData struct {
 	MapName   string
 	ZoneType  tempushttp.ZoneType

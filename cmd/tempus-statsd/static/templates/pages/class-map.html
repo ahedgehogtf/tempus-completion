@@ -20,7 +20,7 @@
       {{ if eq .ZoneType "map" }}
         map
       {{ else }}
-        {{ .ZoneType }} {{ .ZoneIndex }}
+          {{ .ZoneType }} {{ .ZoneIndex }} {{ if ne .CustomName "" }} ({{ .CustomName }}) {{ end }}
       {{ end }}
       </span>
       <span>T{{ .Tier }}</span>

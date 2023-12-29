@@ -1,114 +1,116 @@
 package completionstats
 
 import (
-	"sort"
 	"tempus-completion/cmd/tempus-completion-fetcher/completionstore"
 	"tempus-completion/tempushttp"
-	"time"
 )
 
-func ParsePlayer(raw completionstore.RawPlayerCompletions) completionstore.TransformedPlayerData {
-	const approximateMapCount = 714
+func AggregateMapStats(zones []completionstore.ZoneClassInfo) map[completionstore.MapClass]completionstore.MapClassStatsInfo {
+	maps := make(map[completionstore.MapClass]completionstore.MapClassStatsInfo, 715)
 
-	transformed := completionstore.TransformedPlayerData{
-		Maps: completionstore.PlayerMapAggregation{
-			PlayerID: raw.PlayerID,
-			Fetched:  raw.Updated,
-			Stats:    make([]completionstore.PlayerMapStats, 0, approximateMapCount),
-		},
-		MapZones: make(map[uint64]completionstore.MapZones, approximateMapCount),
-	}
+	for _, info := range zones {
+		mc := completionstore.MapClass{
+			MapID: info.MapID,
+			Class: info.Class,
+		}
 
-	for _, result := range raw.Results {
-		mapID := result.Response.ZoneInfo.MapID
-		zones, ok := transformed.MapZones[mapID]
+		stats, ok := maps[mc]
 		if !ok {
-			zones = completionstore.MapZones{
-				MapName: result.MapName,
-				Soldier: make([]completionstore.PlayerMapClassZoneCompletion, 0, 6),
-				Demoman: make([]completionstore.PlayerMapClassZoneCompletion, 0, 6),
+			stats = completionstore.MapClassStatsInfo{
+				MapName: info.MapName,
+				Stats: completionstore.MapClassStats{
+					ZoneCount:       0,
+					PointsTotal:     0,
+					Tiers:           0,
+					TierPointsTotal: [6]uint16{},
+				},
 			}
 		}
 
-		zone := completionstore.PlayerMapClassZoneCompletion{
-			ZoneType:   result.ZoneType,
-			ZoneIndex:  result.ZoneIndex,
-			CustomName: result.Response.ZoneInfo.CustomName,
-			Duration:   time.Second * time.Duration(result.Response.Result.Duration),
-			Recorded:   time.Unix(int64(result.Response.Result.Date), 0),
-			Rank:       uint32(result.Response.Result.Rank),
-			Demo:       result.Response.Result.DemoInfo.URL,
-			StartTick:  uint64(result.Response.Result.DemoInfo.StartTick),
-			EndTick:    uint64(result.Response.Result.DemoInfo.EndTick),
+		stats.Stats.ZoneCount++
+
+		k := pointValueKey{
+			Tier:     info.Tier,
+			ZoneType: info.ZoneType,
 		}
 
-		switch result.Class {
-		case tempushttp.ClassTypeDemoman:
-			zone.Tier = uint8(result.Response.TierInfo.Demoman)
-			if zone.Tier == 0 {
-				continue
-			}
+		points := pointValues[k]
 
-			zone.Completions = uint32(result.Response.CompletionInfo.Demoman)
-			zones.Demoman = append(zones.Demoman, zone)
-		case tempushttp.ClassTypeSoldier:
-			zone.Tier = uint8(result.Response.TierInfo.Soldier)
-			if zone.Tier == 0 {
-				continue
-			}
+		stats.Stats.PointsTotal += points
+		stats.Stats.TierPointsTotal[info.Tier-1] += points
 
-			zone.Completions = uint32(result.Response.CompletionInfo.Soldier)
-			zones.Soldier = append(zones.Soldier, zone)
-		}
+		tiermask := completionstore.IntToMask(info.Tier)
+		stats.Stats.Tiers = completionstore.Set(stats.Stats.Tiers, tiermask)
 
-		transformed.MapZones[mapID] = zones
+		maps[mc] = stats
 	}
 
+	return maps
+}
+
+type MapStatCalculator struct {
+	PlayerMapResults  map[completionstore.PlayerMap][]completionstore.PlayerClassZoneResult
+	MapClassStatsInfo map[completionstore.MapClass]completionstore.MapClassStatsInfo
+}
+
+func (c MapStatCalculator) Calculate() map[completionstore.PlayerMap]completionstore.PlayerMapStats {
 	a := &mapClassAggregator{}
 
-	for mapID, z := range transformed.MapZones {
-		mapstats := completionstore.PlayerMapStats{
-			MapID:   mapID,
-			MapName: z.MapName,
+	stats := make(map[completionstore.PlayerMap]completionstore.PlayerMapStats, len(c.PlayerMapResults))
+
+	soldier := make([]completionstore.PlayerClassZoneResult, 0, 6)
+	demoman := make([]completionstore.PlayerClassZoneResult, 0, 6)
+
+	for pm, results := range c.PlayerMapResults {
+		s := completionstore.PlayerMapStats{
+			MapID:   pm.MapID,
+			MapName: results[0].MapName,
 		}
 
-		if len(z.Soldier) > 0 {
-			mapstats.Soldier = a.Aggregate(z.Soldier)
+		soldier = soldier[:0]
+		demoman = demoman[:0]
+
+		for _, r := range results {
+			switch r.Class {
+			case tempushttp.ClassTypeDemoman:
+				demoman = append(demoman, r)
+			case tempushttp.ClassTypeSoldier:
+				soldier = append(soldier, r)
+			}
 		}
 
-		if len(z.Demoman) > 0 {
-			mapstats.Demoman = a.Aggregate(z.Demoman)
+		mc := completionstore.MapClass{
+			MapID: pm.MapID,
+			Class: tempushttp.ClassTypeSoldier,
 		}
 
-		transformed.Maps.Stats = append(transformed.Maps.Stats, mapstats)
+		soldierMapStats, ok := c.MapClassStatsInfo[mc]
+		if ok {
+			s.Soldier = a.aggregate(soldier, soldierMapStats.Stats)
+
+		}
+
+		mc.Class = tempushttp.ClassTypeDemoman
+
+		demomanMapStats, ok := c.MapClassStatsInfo[mc]
+		if ok {
+			s.Demoman = a.aggregate(demoman, demomanMapStats.Stats)
+		}
+
+		stats[pm] = s
 	}
 
-	sort.Slice(transformed.Maps.Stats, func(i, j int) bool {
-		return transformed.Maps.Stats[i].MapName < transformed.Maps.Stats[j].MapName
-	})
-
-	return transformed
+	return stats
 }
 
 type mapClassAggregator struct {
-	pointsAcquired  uint16
-	pointsTotal     uint16
-	completed       int
-	incompleteTiers completionstore.Bitmask
-	tiers           completionstore.Bitmask
-	tierPoints      [6]uint16
+	pointsAcquired uint16
+	completed      int
 }
 
 func (a *mapClassAggregator) reset() {
 	a.pointsAcquired = 0
-	a.pointsTotal = 0
 	a.completed = 0
-	a.incompleteTiers = 0
-	a.tiers = 0
-
-	for i := range a.tierPoints {
-		a.tierPoints[i] = 0
-	}
 }
 
 type pointValueKey struct {
@@ -139,48 +141,42 @@ var (
 	}
 )
 
-func (a *mapClassAggregator) Aggregate(zones []completionstore.PlayerMapClassZoneCompletion) completionstore.PlayerClassMapStats {
+func (a *mapClassAggregator) aggregate(zones []completionstore.PlayerClassZoneResult, mapClassStats completionstore.MapClassStats) completionstore.PlayerClassMapStats {
 	a.reset()
 
+	tierPointsLeft := mapClassStats.TierPointsTotal
+
 	for _, zone := range zones {
-		if zone.Tier == 0 {
-			continue
-		}
-
-		tiermask := completionstore.IntToMask(zone.Tier)
-		a.tiers = completionstore.Set(a.tiers, tiermask)
-
 		k := pointValueKey{
 			Tier:     zone.Tier,
 			ZoneType: zone.ZoneType,
 		}
 		points := pointValues[k]
 
-		a.pointsTotal += points
-		a.tierPoints[zone.Tier-1] += points
-
-		if zone.Duration == 0 {
-			a.incompleteTiers = completionstore.Set(a.incompleteTiers, tiermask)
-			continue
-		}
+		tierPointsLeft[zone.Tier-1] -= points
 
 		a.pointsAcquired += points
 		a.completed++
 	}
 
-	var stats completionstore.PlayerClassMapStats
+	var incompleteTiers completionstore.Bitmask
 
-	if a.pointsTotal == 0 {
-		return stats
+	for i, p := range tierPointsLeft {
+		if p == 0 {
+			continue
+		}
+
+		tiermask := completionstore.IntToMask(uint8(i + 1))
+		incompleteTiers = completionstore.Set(incompleteTiers, tiermask)
 	}
 
-	stats = completionstore.PlayerClassMapStats{
-		TotalCompletionPercentage: uint8((a.completed * 100) / len(zones)),
-		PointCompletionPercentage: uint8((a.pointsAcquired * 100) / a.pointsTotal),
-		Tiers:                     a.tiers,
-		IncompleteTiers:           a.incompleteTiers,
-		TotalPointsAvailable:      a.pointsTotal,
-		PointsAvailableByTier:     a.tierPoints,
+	stats := completionstore.PlayerClassMapStats{
+		TotalCompletionPercentage: uint8((len(zones) * 100) / int(mapClassStats.ZoneCount)),
+		PointCompletionPercentage: uint8((a.pointsAcquired * 100) / mapClassStats.PointsTotal),
+		Tiers:                     mapClassStats.Tiers,
+		IncompleteTiers:           incompleteTiers,
+		TotalPointsAvailable:      mapClassStats.PointsTotal,
+		PointsAvailableByTier:     tierPointsLeft,
 	}
 
 	return stats
