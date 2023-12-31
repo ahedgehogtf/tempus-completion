@@ -44,11 +44,10 @@ type DetailedMapListVideos struct {
 type ZoneType string
 
 const (
-	ZoneTypeTrick      ZoneType = "trick"
-	ZoneTypeCourse     ZoneType = "course"
-	ZoneTypeBonus      ZoneType = "bonus"
-	ZoneTypeCheckpoint ZoneType = "checkpoint"
-	ZoneTypeMap        ZoneType = "map"
+	ZoneTypeTrick  ZoneType = "trick"
+	ZoneTypeCourse ZoneType = "course"
+	ZoneTypeBonus  ZoneType = "bonus"
+	ZoneTypeMap    ZoneType = "map"
 )
 
 type ClassType uint8

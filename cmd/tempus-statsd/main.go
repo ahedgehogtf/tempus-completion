@@ -12,6 +12,8 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
+	"tempus-completion/cmd/tempus-completion-fetcher/completionstats"
 	"tempus-completion/cmd/tempus-completion-fetcher/completionstore"
 	"tempus-completion/cmd/tempus-completion-fetcher/rqlitecompletionstore"
 	"tempus-completion/cmd/tempus-statsd/httpserveutil"
@@ -83,8 +85,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 }
 
 type Store interface {
+	GetPlayerBySteamID(ctx context.Context, steamID string) (uint64, bool, error)
+	GetPlayerClassZoneResults(ctx context.Context, playerID uint64, zoneTypes []string, tiers, classes []uint8) ([]completionstore.PlayerClassZoneResult, bool, error)
 	GetPlayerMapZones(ctx context.Context, playerID, mapID uint64) (*completionstore.MapZones, bool, error)
-	GetCompletions(ctx context.Context, playerid uint64) (map[uint64]completionstore.PlayerMapStats, bool, error)
 }
 
 type Handler struct {
@@ -117,14 +120,30 @@ func (h *Handler) serveSearchPage(w http.ResponseWriter, r *http.Request) error 
 func (h *Handler) serveResultsPage(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 
-	name := q.Get("name")
-	if name == "" {
+	query := q.Get("name")
+	if query == "" {
 		return httpserveutil.BadRequest(w, "must specify name")
 	}
 
 	ctx := r.Context()
 
-	result, err := h.client.SearchPlayersAndMaps(ctx, name)
+	if strings.HasPrefix(query, "STEAM") {
+		playerID, ok, err := h.store.GetPlayerBySteamID(ctx, query)
+		if err != nil {
+			return httpserveutil.InternalError(w, "get player by Steam ID: %w", err)
+		}
+
+		if !ok {
+			return httpserveutil.BadRequest(w, "could not find Player ID associated with that Steam ID")
+		}
+
+		addr := fmt.Sprintf("/completions?playerid=%d", playerID)
+
+		http.Redirect(w, r, addr, http.StatusPermanentRedirect)
+		return nil
+	}
+
+	result, err := h.client.SearchPlayersAndMaps(ctx, query)
 	if err != nil {
 		return httpserveutil.BadRequest(w, "search players and maps: %w", err)
 	}
@@ -143,6 +162,15 @@ func (h *Handler) serveResultsPage(w http.ResponseWriter, r *http.Request) error
 
 	return nil
 }
+
+var (
+	zoneTypePriorities = map[tempushttp.ZoneType]int{
+		tempushttp.ZoneTypeMap:    1,
+		tempushttp.ZoneTypeCourse: 2,
+		tempushttp.ZoneTypeBonus:  3,
+		tempushttp.ZoneTypeTrick:  4,
+	}
+)
 
 func (h *Handler) serveMapPage(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
@@ -197,6 +225,13 @@ func (h *Handler) serveMapPage(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	sort.Slice(d.Completions, func(i, j int) bool {
+		pi := zoneTypePriorities[d.Completions[i].ZoneType]
+		pj := zoneTypePriorities[d.Completions[j].ZoneType]
+
+		if pi != pj {
+			return pi < pj
+		}
+
 		return d.Completions[i].Tier < d.Completions[j].Tier
 	})
 
@@ -207,63 +242,19 @@ func (h *Handler) serveMapPage(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func SoldierIncludeTier(includeTiers completionstore.Bitmask, s completionstore.PlayerMapStats) bool {
-	return includeTiers&s.Soldier.Tiers != 0
-}
-
-func SoldierCheckIncomplete(includeTiers completionstore.Bitmask, s completionstore.PlayerMapStats) bool {
-	return s.Soldier.IncompleteTiers&includeTiers != 0
-}
-
-func DemomanIncludeTier(includeTiers completionstore.Bitmask, s completionstore.PlayerMapStats) bool {
-	return includeTiers&s.Demoman.Tiers != 0
-}
-
-func BothIncludeTier(includeTiers completionstore.Bitmask, s completionstore.PlayerMapStats) bool {
-	return DemomanIncludeTier(includeTiers, s) || SoldierIncludeTier(includeTiers, s)
-}
-
-func DemomanCheckIncomplete(includeTiers completionstore.Bitmask, s completionstore.PlayerMapStats) bool {
-	return s.Demoman.IncompleteTiers&includeTiers != 0
-}
-
-func BothCheckIncomplete(includeTiers completionstore.Bitmask, s completionstore.PlayerMapStats) bool {
-	return DemomanCheckIncomplete(includeTiers, s) || SoldierCheckIncomplete(includeTiers, s)
-}
-
-func SortSoldierTierAscendingIncomplete(stats []completionstore.PlayerMapStats) {
-	sort.SliceStable(stats, func(i, j int) bool {
-		return stats[i].Soldier.IncompleteTiers < stats[j].Soldier.IncompleteTiers
-	})
-}
-
-func SortDemomanTierAscendingIncomplete(stats []completionstore.PlayerMapStats) {
-	sort.SliceStable(stats, func(i, j int) bool {
-		return stats[i].Demoman.IncompleteTiers < stats[j].Demoman.IncompleteTiers
-	})
-}
-
-func SortBothTierAscendingIncomplete(stats []completionstore.PlayerMapStats) {
-	sort.SliceStable(stats, func(i, j int) bool {
-		d := stats[i].Demoman.IncompleteTiers < stats[j].Demoman.IncompleteTiers
-		s := stats[i].Soldier.IncompleteTiers < stats[j].Soldier.IncompleteTiers
-		return d && s
-	})
-}
-
-func SortSoldierTierAscendingAll(stats []completionstore.PlayerMapStats) {
+func SortSoldierTierAscending(stats []completionstats.PlayerMapResultStats) {
 	sort.SliceStable(stats, func(i, j int) bool {
 		return stats[i].Soldier.Tiers < stats[j].Soldier.Tiers
 	})
 }
 
-func SortDemomanTierAscendingAll(stats []completionstore.PlayerMapStats) {
+func SortDemomanTierAscending(stats []completionstats.PlayerMapResultStats) {
 	sort.SliceStable(stats, func(i, j int) bool {
 		return stats[i].Demoman.Tiers < stats[j].Demoman.Tiers
 	})
 }
 
-func SortBothTierAscendingAll(stats []completionstore.PlayerMapStats) {
+func SortBothTierAscending(stats []completionstats.PlayerMapResultStats) {
 	sort.SliceStable(stats, func(i, j int) bool {
 		d := stats[i].Demoman.Tiers < stats[j].Demoman.Tiers
 		s := stats[i].Soldier.Tiers < stats[j].Soldier.Tiers
@@ -271,39 +262,19 @@ func SortBothTierAscendingAll(stats []completionstore.PlayerMapStats) {
 	})
 }
 
-func SortSoldierTierDescendingIncomplete(stats []completionstore.PlayerMapStats) {
-	sort.SliceStable(stats, func(i, j int) bool {
-		return stats[i].Soldier.IncompleteTiers > stats[j].Soldier.IncompleteTiers
-	})
-}
-
-func SortDemomanTierDescendingIncomplete(stats []completionstore.PlayerMapStats) {
-	sort.SliceStable(stats, func(i, j int) bool {
-		return stats[i].Demoman.IncompleteTiers > stats[j].Demoman.IncompleteTiers
-	})
-}
-
-func SortBothTierDescendingIncomplete(stats []completionstore.PlayerMapStats) {
-	sort.SliceStable(stats, func(i, j int) bool {
-		d := stats[i].Demoman.IncompleteTiers > stats[j].Demoman.IncompleteTiers
-		s := stats[i].Soldier.IncompleteTiers > stats[j].Soldier.IncompleteTiers
-		return d && s
-	})
-}
-
-func SortSoldierTierDescendingAll(stats []completionstore.PlayerMapStats) {
+func SortSoldierTierDescending(stats []completionstats.PlayerMapResultStats) {
 	sort.SliceStable(stats, func(i, j int) bool {
 		return stats[i].Soldier.Tiers > stats[j].Soldier.Tiers
 	})
 }
 
-func SortDemomanTierDescendingAll(stats []completionstore.PlayerMapStats) {
+func SortDemomanTierDescending(stats []completionstats.PlayerMapResultStats) {
 	sort.SliceStable(stats, func(i, j int) bool {
 		return stats[i].Demoman.Tiers > stats[j].Demoman.Tiers
 	})
 }
 
-func SortBothTierDescendingAll(stats []completionstore.PlayerMapStats) {
+func SortBothTierDescending(stats []completionstats.PlayerMapResultStats) {
 	sort.SliceStable(stats, func(i, j int) bool {
 		d := stats[i].Demoman.Tiers > stats[j].Demoman.Tiers
 		s := stats[i].Soldier.Tiers > stats[j].Soldier.Tiers
@@ -311,52 +282,109 @@ func SortBothTierDescendingAll(stats []completionstore.PlayerMapStats) {
 	})
 }
 
-func SortMapNameAscending(stats []completionstore.PlayerMapStats) {
+func SortMapNameAscending(stats []completionstats.PlayerMapResultStats) {
 	sort.SliceStable(stats, func(i, j int) bool {
 		return stats[i].MapName < stats[j].MapName
 	})
 }
 
-func SortMapNameDescending(stats []completionstore.PlayerMapStats) {
+func SortMapNameDescending(stats []completionstats.PlayerMapResultStats) {
 	sort.SliceStable(stats, func(i, j int) bool {
 		return stats[i].MapName > stats[j].MapName
 	})
 }
-func SortSoldierCompletionDescending(stats []completionstore.PlayerMapStats) {
+
+func SortSoldierCompletionDescending(stats []completionstats.PlayerMapResultStats) {
 	sort.SliceStable(stats, func(i, j int) bool {
-		return stats[i].Soldier.TotalCompletionPercentage > stats[j].Soldier.TotalCompletionPercentage
+		return stats[i].Soldier.ZonesFinishedPercentage > stats[j].Soldier.ZonesFinishedPercentage
 	})
 }
 
-func SortSoldierCompletionAscending(stats []completionstore.PlayerMapStats) {
+func SortSoldierCompletionAscending(stats []completionstats.PlayerMapResultStats) {
 	sort.SliceStable(stats, func(i, j int) bool {
-		return stats[i].Soldier.TotalCompletionPercentage < stats[j].Soldier.TotalCompletionPercentage
+		return stats[i].Soldier.ZonesFinishedPercentage < stats[j].Soldier.ZonesFinishedPercentage
 	})
 }
-func SortDemomanCompletionDescending(stats []completionstore.PlayerMapStats) {
+func SortDemomanCompletionDescending(stats []completionstats.PlayerMapResultStats) {
 	sort.SliceStable(stats, func(i, j int) bool {
-		return stats[i].Demoman.TotalCompletionPercentage > stats[j].Demoman.TotalCompletionPercentage
-	})
-}
-
-func SortDemomanCompletionAscending(stats []completionstore.PlayerMapStats) {
-	sort.SliceStable(stats, func(i, j int) bool {
-		return stats[i].Demoman.TotalCompletionPercentage < stats[j].Demoman.TotalCompletionPercentage
+		return stats[i].Demoman.ZonesFinishedPercentage > stats[j].Demoman.ZonesFinishedPercentage
 	})
 }
 
-func SortBothCompletionDescending(stats []completionstore.PlayerMapStats) {
+func SortDemomanCompletionAscending(stats []completionstats.PlayerMapResultStats) {
 	sort.SliceStable(stats, func(i, j int) bool {
-		d0 := stats[i].Demoman.TotalCompletionPercentage
-		d1 := stats[j].Demoman.TotalCompletionPercentage
-		s0 := stats[i].Soldier.TotalCompletionPercentage
-		s1 := stats[j].Soldier.TotalCompletionPercentage
-
-		return max(d0, s0) > max(d1, s1)
+		return stats[i].Demoman.ZonesFinishedPercentage < stats[j].Demoman.ZonesFinishedPercentage
 	})
 }
 
-func max(a, b uint8) uint8 {
+func SortBothCompletionDescending(stats []completionstats.PlayerMapResultStats) {
+	sort.SliceStable(stats, func(i, j int) bool {
+		d0 := stats[i].Demoman.ZonesFinishedPercentage
+		d1 := stats[j].Demoman.ZonesFinishedPercentage
+		s0 := stats[i].Soldier.ZonesFinishedPercentage
+		s1 := stats[j].Soldier.ZonesFinishedPercentage
+
+		return max8(d0, s0) > max8(d1, s1)
+	})
+}
+
+func SortBothCompletionAscending(stats []completionstats.PlayerMapResultStats) {
+	sort.SliceStable(stats, func(i, j int) bool {
+		d0 := stats[i].Demoman.ZonesFinishedPercentage
+		d1 := stats[j].Demoman.ZonesFinishedPercentage
+		s0 := stats[i].Soldier.ZonesFinishedPercentage
+		s1 := stats[j].Soldier.ZonesFinishedPercentage
+
+		return max8(d0, s0) < max8(d1, s1)
+	})
+}
+
+func SortSoldierCompletionCountDescending(stats []completionstats.PlayerMapResultStats) {
+	sort.SliceStable(stats, func(i, j int) bool {
+		return stats[i].Soldier.MostPopularCompletions > stats[j].Soldier.MostPopularCompletions
+	})
+}
+
+func SortSoldierCompletionCountAscending(stats []completionstats.PlayerMapResultStats) {
+	sort.SliceStable(stats, func(i, j int) bool {
+		return stats[i].Soldier.LeastPopularCompletions < stats[j].Soldier.LeastPopularCompletions
+	})
+}
+func SortDemomanCompletionCountDescending(stats []completionstats.PlayerMapResultStats) {
+	sort.SliceStable(stats, func(i, j int) bool {
+		return stats[i].Demoman.MostPopularCompletions > stats[j].Demoman.MostPopularCompletions
+	})
+}
+
+func SortDemomanCompletionCountAscending(stats []completionstats.PlayerMapResultStats) {
+	sort.SliceStable(stats, func(i, j int) bool {
+		return stats[i].Demoman.LeastPopularCompletions < stats[j].Demoman.LeastPopularCompletions
+	})
+}
+
+func SortBothCompletionCountDescending(stats []completionstats.PlayerMapResultStats) {
+	sort.SliceStable(stats, func(i, j int) bool {
+		d0 := stats[i].Demoman.MostPopularCompletions
+		d1 := stats[j].Demoman.MostPopularCompletions
+		s0 := stats[i].Soldier.MostPopularCompletions
+		s1 := stats[j].Soldier.MostPopularCompletions
+
+		return max32(d0, s0) > max32(d1, s1)
+	})
+}
+
+func SortBothCompletionCountAscending(stats []completionstats.PlayerMapResultStats) {
+	sort.SliceStable(stats, func(i, j int) bool {
+		d0 := stats[i].Demoman.LeastPopularCompletions
+		d1 := stats[j].Demoman.LeastPopularCompletions
+		s0 := stats[i].Soldier.LeastPopularCompletions
+		s1 := stats[j].Soldier.LeastPopularCompletions
+
+		return max32(d0, s0) < max32(d1, s1)
+	})
+}
+
+func max8(a, b uint8) uint8 {
 	if a > b {
 		return a
 	}
@@ -364,81 +392,64 @@ func max(a, b uint8) uint8 {
 	return b
 }
 
-func SortBothCompletionAscending(stats []completionstore.PlayerMapStats) {
-	sort.SliceStable(stats, func(i, j int) bool {
-		d0 := stats[i].Demoman.TotalCompletionPercentage
-		d1 := stats[j].Demoman.TotalCompletionPercentage
-		s0 := stats[i].Soldier.TotalCompletionPercentage
-		s1 := stats[j].Soldier.TotalCompletionPercentage
+func max32(a, b uint32) uint32 {
+	if a > b {
+		return a
+	}
 
-		return max(d0, s0) < max(d1, s1)
-	})
+	return b
 }
 
 type sortFuncsKey struct {
-	sortType      string
-	class         string
-	hideCompleted bool
+	sortType string
+	class    string
 }
 
 var (
 	sortFuncs = map[sortFuncsKey]SortFunc{
-		{sortType: "tier-ascending", class: "both", hideCompleted: false}:           SortBothTierAscendingAll,
-		{sortType: "tier-ascending", class: "both", hideCompleted: true}:            SortBothTierAscendingIncomplete,
-		{sortType: "tier-ascending", class: "soldier", hideCompleted: false}:        SortSoldierTierAscendingAll,
-		{sortType: "tier-ascending", class: "soldier", hideCompleted: true}:         SortSoldierTierAscendingIncomplete,
-		{sortType: "tier-ascending", class: "demoman", hideCompleted: false}:        SortDemomanTierAscendingAll,
-		{sortType: "tier-ascending", class: "demoman", hideCompleted: true}:         SortDemomanTierAscendingIncomplete,
-		{sortType: "tier-descending", class: "both", hideCompleted: false}:          SortBothTierDescendingAll,
-		{sortType: "tier-descending", class: "both", hideCompleted: true}:           SortBothTierDescendingIncomplete,
-		{sortType: "tier-descending", class: "soldier", hideCompleted: false}:       SortSoldierTierDescendingAll,
-		{sortType: "tier-descending", class: "soldier", hideCompleted: true}:        SortSoldierTierDescendingIncomplete,
-		{sortType: "tier-descending", class: "demoman", hideCompleted: false}:       SortDemomanTierDescendingAll,
-		{sortType: "tier-descending", class: "demoman", hideCompleted: true}:        SortDemomanTierDescendingIncomplete,
-		{sortType: "map-name-descending", class: "both", hideCompleted: false}:      SortMapNameDescending,
-		{sortType: "map-name-descending", class: "both", hideCompleted: true}:       SortMapNameDescending,
-		{sortType: "map-name-descending", class: "soldier", hideCompleted: false}:   SortMapNameDescending,
-		{sortType: "map-name-descending", class: "soldier", hideCompleted: true}:    SortMapNameDescending,
-		{sortType: "map-name-descending", class: "demoman", hideCompleted: false}:   SortMapNameDescending,
-		{sortType: "map-name-descending", class: "demoman", hideCompleted: true}:    SortMapNameDescending,
-		{sortType: "map-name-ascending", class: "both", hideCompleted: false}:       SortMapNameAscending,
-		{sortType: "map-name-ascending", class: "both", hideCompleted: true}:        SortMapNameAscending,
-		{sortType: "map-name-ascending", class: "soldier", hideCompleted: false}:    SortMapNameAscending,
-		{sortType: "map-name-ascending", class: "soldier", hideCompleted: true}:     SortMapNameAscending,
-		{sortType: "map-name-ascending", class: "demoman", hideCompleted: false}:    SortMapNameAscending,
-		{sortType: "map-name-ascending", class: "demoman", hideCompleted: true}:     SortMapNameAscending,
-		{sortType: "", class: "both", hideCompleted: false}:                         SortMapNameAscending,
-		{sortType: "", class: "both", hideCompleted: true}:                          SortMapNameAscending,
-		{sortType: "", class: "soldier", hideCompleted: false}:                      SortMapNameAscending,
-		{sortType: "", class: "soldier", hideCompleted: true}:                       SortMapNameAscending,
-		{sortType: "", class: "demoman", hideCompleted: false}:                      SortMapNameAscending,
-		{sortType: "", class: "demoman", hideCompleted: true}:                       SortMapNameAscending,
-		{sortType: "completion-ascending", class: "both", hideCompleted: false}:     SortBothCompletionAscending,
-		{sortType: "completion-ascending", class: "both", hideCompleted: true}:      SortBothCompletionAscending,
-		{sortType: "completion-ascending", class: "soldier", hideCompleted: false}:  SortSoldierCompletionAscending,
-		{sortType: "completion-ascending", class: "soldier", hideCompleted: true}:   SortSoldierCompletionAscending,
-		{sortType: "completion-ascending", class: "demoman", hideCompleted: false}:  SortDemomanCompletionAscending,
-		{sortType: "completion-ascending", class: "demoman", hideCompleted: true}:   SortDemomanCompletionAscending,
-		{sortType: "completion-descending", class: "both", hideCompleted: false}:    SortBothCompletionDescending,
-		{sortType: "completion-descending", class: "both", hideCompleted: true}:     SortBothCompletionDescending,
-		{sortType: "completion-descending", class: "soldier", hideCompleted: false}: SortSoldierCompletionDescending,
-		{sortType: "completion-descending", class: "soldier", hideCompleted: true}:  SortSoldierCompletionDescending,
-		{sortType: "completion-descending", class: "demoman", hideCompleted: false}: SortDemomanCompletionDescending,
-		{sortType: "completion-descending", class: "demoman", hideCompleted: true}:  SortDemomanCompletionDescending,
+		{sortType: "tier-ascending", class: "both"}:                 SortBothTierAscending,
+		{sortType: "tier-ascending", class: "soldier"}:              SortSoldierTierAscending,
+		{sortType: "tier-ascending", class: "demoman"}:              SortDemomanTierAscending,
+		{sortType: "tier-descending", class: "both"}:                SortBothTierDescending,
+		{sortType: "tier-descending", class: "soldier"}:             SortSoldierTierDescending,
+		{sortType: "tier-descending", class: "demoman"}:             SortDemomanTierDescending,
+		{sortType: "map-name-ascending", class: "both"}:             SortMapNameAscending,
+		{sortType: "map-name-ascending", class: "soldier"}:          SortMapNameAscending,
+		{sortType: "map-name-ascending", class: "demoman"}:          SortMapNameAscending,
+		{sortType: "map-name-descending", class: "both"}:            SortMapNameDescending,
+		{sortType: "map-name-descending", class: "soldier"}:         SortMapNameDescending,
+		{sortType: "map-name-descending", class: "demoman"}:         SortMapNameDescending,
+		{sortType: "", class: "both"}:                               SortMapNameAscending,
+		{sortType: "", class: "soldier"}:                            SortMapNameAscending,
+		{sortType: "", class: "demoman"}:                            SortMapNameAscending,
+		{sortType: "completion-ascending", class: "both"}:           SortBothCompletionAscending,
+		{sortType: "completion-ascending", class: "soldier"}:        SortSoldierCompletionAscending,
+		{sortType: "completion-ascending", class: "demoman"}:        SortDemomanCompletionAscending,
+		{sortType: "completion-descending", class: "both"}:          SortBothCompletionDescending,
+		{sortType: "completion-descending", class: "soldier"}:       SortSoldierCompletionDescending,
+		{sortType: "completion-descending", class: "demoman"}:       SortDemomanCompletionDescending,
+		{sortType: "completion-count-ascending", class: "both"}:     SortBothCompletionCountAscending,
+		{sortType: "completion-count-ascending", class: "soldier"}:  SortSoldierCompletionCountAscending,
+		{sortType: "completion-count-ascending", class: "demoman"}:  SortDemomanCompletionCountAscending,
+		{sortType: "completion-count-descending", class: "both"}:    SortBothCompletionCountDescending,
+		{sortType: "completion-count-descending", class: "soldier"}: SortSoldierCompletionCountDescending,
+		{sortType: "completion-count-descending", class: "demoman"}: SortDemomanCompletionCountDescending,
 	}
 )
 
-type SortFunc func([]completionstore.PlayerMapStats)
-type IncludeFunc func(completionstore.Bitmask, completionstore.PlayerMapStats) bool
+type SortFunc func([]completionstats.PlayerMapResultStats)
 
 func (h *Handler) serveCompletionsPage(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 
 	pid := q.Get("playerid")
+	if pid == "" {
+		return httpserveutil.BadRequest(w, "must specify playerID")
+	}
 
 	playerID, err := strconv.ParseUint(pid, 10, 64)
 	if err != nil {
-		return httpserveutil.BadRequest(w, "malformed playerID: %w", err)
+		return httpserveutil.BadRequest(w, "malformed playerID")
 	}
 
 	// TODO: use bitmask for filters, too
@@ -449,10 +460,15 @@ func (h *Handler) serveCompletionsPage(w http.ResponseWriter, r *http.Request) e
 		Tier4Checked         bool
 		Tier5Checked         bool
 		Tier6Checked         bool
+		MapZoneChecked       bool
+		CourseZoneChecked    bool
+		BonusZoneChecked     bool
+		TrickZoneChecked     bool
 		SoldierChecked       bool
 		DemomanChecked       bool
 		HideCompletedChecked bool
 		Sort                 string
+		Measurement          string
 	}
 
 	var includeTiers completionstore.Bitmask
@@ -463,46 +479,73 @@ func (h *Handler) serveCompletionsPage(w http.ResponseWriter, r *http.Request) e
 		tiers = []string{"t1", "t2", "t3", "t4", "t5", "t6"}
 	}
 
+	queryTiers := make([]uint8, 0, len(tiers))
+
 	var pf pageFilters
 
 	for _, v := range tiers {
 		switch v {
 		case "t1":
+			queryTiers = append(queryTiers, 1)
 			includeTiers = completionstore.Set(includeTiers, completionstore.T1)
 			pf.Tier1Checked = true
 		case "t2":
+			queryTiers = append(queryTiers, 2)
 			includeTiers = completionstore.Set(includeTiers, completionstore.T2)
 			pf.Tier2Checked = true
 		case "t3":
+			queryTiers = append(queryTiers, 3)
 			includeTiers = completionstore.Set(includeTiers, completionstore.T3)
 			pf.Tier3Checked = true
 		case "t4":
+			queryTiers = append(queryTiers, 4)
 			includeTiers = completionstore.Set(includeTiers, completionstore.T4)
 			pf.Tier4Checked = true
 		case "t5":
+			queryTiers = append(queryTiers, 5)
 			includeTiers = completionstore.Set(includeTiers, completionstore.T5)
 			pf.Tier5Checked = true
 		case "t6":
+			queryTiers = append(queryTiers, 6)
 			includeTiers = completionstore.Set(includeTiers, completionstore.T6)
 			pf.Tier6Checked = true
 		}
 	}
 
-	includeFuncs := make([]IncludeFunc, 0, 4)
+	zoneTypes := q["zone-type"]
+
+	if len(zoneTypes) == 0 {
+		zoneTypes = []string{"map", "course", "bonus"}
+	}
+
+	for _, v := range zoneTypes {
+		switch v {
+		case "map":
+			pf.MapZoneChecked = true
+		case "course":
+			pf.CourseZoneChecked = true
+		case "bonus":
+			pf.BonusZoneChecked = true
+		case "trick":
+			pf.TrickZoneChecked = true
+		default:
+			return httpserveutil.BadRequest(w, "zone-type '%s' is not supported", v)
+		}
+	}
 
 	hideCompleted := q.Get("hide-completed") == "true"
-
 	pf.HideCompletedChecked = hideCompleted
 
 	classes := q["class"]
 	sortType := q.Get("sort")
 
 	sfk := sortFuncsKey{
-		sortType:      sortType,
-		hideCompleted: hideCompleted,
+		sortType: sortType,
 	}
 
 	pf.Sort = sortType
+
+	var queryClasses []uint8
 
 	switch len(classes) {
 	case 2, 0:
@@ -511,13 +554,7 @@ func (h *Handler) serveCompletionsPage(w http.ResponseWriter, r *http.Request) e
 		pf.SoldierChecked = true
 		pf.DemomanChecked = true
 
-		if len(tiers) != 6 {
-			includeFuncs = append(includeFuncs, BothIncludeTier)
-		}
-
-		if hideCompleted {
-			includeFuncs = append(includeFuncs, BothCheckIncomplete)
-		}
+		queryClasses = []uint8{3, 4}
 
 	case 1:
 		switch classes[0] {
@@ -525,25 +562,12 @@ func (h *Handler) serveCompletionsPage(w http.ResponseWriter, r *http.Request) e
 			sfk.class = "soldier"
 			pf.SoldierChecked = true
 
-			if len(tiers) != 6 {
-				includeFuncs = append(includeFuncs, SoldierIncludeTier)
-			}
-
-			if hideCompleted && len(classes) == 1 {
-				includeFuncs = append(includeFuncs, SoldierCheckIncomplete)
-			}
-
+			queryClasses = []uint8{3}
 		case "demoman":
 			sfk.class = "demoman"
 			pf.DemomanChecked = true
 
-			if len(tiers) != 6 {
-				includeFuncs = append(includeFuncs, DemomanIncludeTier)
-			}
-
-			if hideCompleted && len(classes) == 1 {
-				includeFuncs = append(includeFuncs, DemomanCheckIncomplete)
-			}
+			queryClasses = []uint8{4}
 		}
 	default:
 		return httpserveutil.BadRequest(w, "must specify 1 or 2 classes")
@@ -551,42 +575,35 @@ func (h *Handler) serveCompletionsPage(w http.ResponseWriter, r *http.Request) e
 
 	ctx := r.Context()
 
-	stats, ok, err := h.store.GetCompletions(ctx, playerID)
+	results, _, err := h.store.GetPlayerClassZoneResults(ctx, playerID, zoneTypes, queryTiers, queryClasses)
 	if err != nil {
 		return httpserveutil.InternalError(w, "get completions: %w", err)
 	}
 
-	if !ok {
-		return httpserveutil.NotFound(w, "Your player ID was not found; for now you must submit a record before we can show you completions!")
-	}
-
-	filtered := make([]completionstore.PlayerMapStats, 0, len(stats))
-
-loop:
-	for _, stat := range stats {
-		for _, include := range includeFuncs {
-			if !include(includeTiers, stat) {
-				continue loop
-			}
-		}
-
-		filtered = append(filtered, stat)
-	}
+	stats := completionstats.AggregateMapResultStats(results, hideCompleted)
 
 	if sf, ok := sortFuncs[sfk]; ok {
-		sf(filtered)
+		sf(stats)
+	}
+	measurement := q.Get("measurement")
+	switch measurement {
+	case "zones-finished-percentage", "points-finished-percentage":
+	default:
+		measurement = "zones-finished-percentage"
 	}
 
+	pf.Measurement = measurement
+
 	type pageData struct {
-		PlayerCompletions []completionstore.PlayerMapStats
-		PlayerID          uint64
-		Filters           pageFilters
+		PlayerID uint64
+		Filters  pageFilters
+		Stats    []completionstats.PlayerMapResultStats
 	}
 
 	d := pageData{
-		PlayerCompletions: filtered,
-		PlayerID:          playerID,
-		Filters:           pf,
+		PlayerID: playerID,
+		Filters:  pf,
+		Stats:    stats,
 	}
 
 	if err := h.templates.completions.Execute(w, d); err != nil {

@@ -28,6 +28,7 @@ func main() {
 }
 
 type Store interface {
+	InsertSteamIDs(ctx context.Context, steamIDs map[string]uint64) error
 	InsertMapStats(ctx context.Context, stats map[uint64]completionstore.MapStatsInfo) error
 	GetAllZoneClassInfo(ctx context.Context) ([]completionstore.ZoneClassInfo, error)
 	InsertZoneClassInfo(ctx context.Context, info []completionstore.ZoneClassInfo) error
@@ -107,6 +108,17 @@ func (f *Fetcher) UpdateMaps(ctx context.Context) error {
 
 			zones[zone] = struct{}{}
 		}
+
+		for i := 0; i < r.ZoneCounts.Trick; i++ {
+			zone := completionstore.Zone{
+				MapID:     uint64(r.ID),
+				MapName:   r.Name,
+				ZoneType:  tempushttp.ZoneTypeTrick,
+				ZoneIndex: uint8(i + 1),
+			}
+
+			zones[zone] = struct{}{}
+		}
 	}
 
 	if err := f.store.InsertZones(ctx, zones); err != nil {
@@ -178,6 +190,7 @@ type zoneResults struct {
 	Demoman            completionstore.ZoneClassInfo
 	Soldier            completionstore.ZoneClassInfo
 	PlayerClassResults []completionstore.PlayerClassZoneResult
+	SteamIDs           map[string]uint64
 }
 
 func (f *Fetcher) fetchPlayerClassZoneResults(ctx context.Context, zones []completionstore.Zone) ([]zoneResults, error) {
@@ -222,7 +235,8 @@ func (f *Fetcher) fetchPlayerClassZoneResults(ctx context.Context, zones []compl
 
 				results := make([]completionstore.PlayerClassZoneResult, 0, ns+nd)
 
-				// fmt.Fprintf(f.stdout, "zone %s found %d records\n", data, ns+nd)
+				steamIDs := make(map[string]uint64)
+
 				mapID := response.ZoneInfo.MapID
 				zoneType := tempushttp.ZoneType(response.ZoneInfo.Type)
 				zoneIndex := uint8(response.ZoneInfo.Zoneindex)
@@ -246,6 +260,7 @@ func (f *Fetcher) fetchPlayerClassZoneResults(ctx context.Context, zones []compl
 					}
 
 					results = append(results, result)
+					steamIDs[r.SteamID] = result.PlayerID
 				}
 
 				for _, r := range response.Results.Demoman {
@@ -266,6 +281,7 @@ func (f *Fetcher) fetchPlayerClassZoneResults(ctx context.Context, zones []compl
 					}
 
 					results = append(results, result)
+					steamIDs[r.SteamID] = result.PlayerID
 				}
 
 				zr := zoneResults{
@@ -290,6 +306,7 @@ func (f *Fetcher) fetchPlayerClassZoneResults(ctx context.Context, zones []compl
 						Completions: uint32(ns),
 					},
 					PlayerClassResults: results,
+					SteamIDs:           steamIDs,
 				}
 
 				out <- zr
@@ -361,10 +378,15 @@ func (f *Fetcher) updateRawPlayerCompletionsNew(ctx context.Context) (bool, erro
 
 	results := make([]completionstore.PlayerClassZoneResult, 0, len(zoneResults)*5000)
 	info := make([]completionstore.ZoneClassInfo, 0, len(zoneResults)*2)
+	steamIDs := make(map[string]uint64, 10000)
 
 	for _, r := range zoneResults {
 		results = append(results, r.PlayerClassResults...)
 		info = append(info, r.Demoman, r.Soldier)
+
+		for steamID, playerID := range r.SteamIDs {
+			steamIDs[steamID] = playerID
+		}
 	}
 
 	if err := f.store.InsertPlayerClassZoneResults(ctx, results); err != nil {
@@ -373,6 +395,10 @@ func (f *Fetcher) updateRawPlayerCompletionsNew(ctx context.Context) (bool, erro
 
 	if err := f.store.InsertZoneClassInfo(ctx, info); err != nil {
 		return false, fmt.Errorf("insert zone info: %w", err)
+	}
+
+	if err := f.store.InsertSteamIDs(ctx, steamIDs); err != nil {
+		return false, fmt.Errorf("insert steam IDs: %w", err)
 	}
 
 	if err := f.store.SetZonesFetched(ctx, zones, now); err != nil {

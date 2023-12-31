@@ -44,14 +44,38 @@
   <input type="text" hidden name="playerid" value="{{ .PlayerID }}" />
 </fieldset>
 <fieldset>
+  <legend>Zone types</legend>
+  <div>
+    <input type="checkbox" id="map" name="zone-type" value="map" {{ if .Filters.MapZoneChecked }} checked {{ end }} />
+    <label for="map">Map</label>
+  </div>
+  <div>
+    <input type="checkbox" id="course" name="zone-type" value="course" {{ if .Filters.CourseZoneChecked }} checked {{ end }} />
+    <label for="course">Course</label>
+    </div>
+    <div>
+    <input type="checkbox" id="bonus" name="zone-type" value="bonus" {{ if .Filters.BonusZoneChecked }} checked {{ end }} />
+    <label for="bonus">Bonus</label>
+    </div>
+</fieldset>
+  <fieldset>
+    <legend>Measurement</legend>
+  <select name="measurement" id="measurement">
+    <option {{ if eq .Filters.Measurement "zones-finished-percentage" }} selected {{end}} value="zones-finished-percentage">Zone percentage</option>
+    <option {{ if eq .Filters.Measurement "points-finished-percentage" }} selected {{end}} value="points-finished-percentage">Points percentage</option>
+  </select>
+  </fieldset>
+<fieldset>
   <legend>Sort</legend>
   <select name="sort" id="sort">
     <option {{ if eq .Filters.Sort "map-name-ascending" }} selected {{end}} value="map-name-ascending">Name (A-Z)</option>
     <option {{ if eq .Filters.Sort "map-name-descending" }} selected {{end}} value="map-name-descending">Name (Z-A)</option>
     <option value="tier-ascending" {{ if eq .Filters.Sort "tier-ascending" }} selected {{end}} >Lowest tier</option>
     <option {{ if eq .Filters.Sort "tier-descending" }} selected {{end}} value="tier-descending">Highest tier</option>
-    <option value="completion-ascending" {{ if eq .Filters.Sort "completion-ascending" }} selected {{end}} >Lowest completion</option>
-    <option {{ if eq .Filters.Sort "completion-descending" }} selected {{end}} value="completion-descending">Highest completion</option>
+    <option value="completion-ascending" {{ if eq .Filters.Sort "completion-ascending" }} selected {{end}} >Least complete</option>
+    <option {{ if eq .Filters.Sort "completion-descending" }} selected {{end}} value="completion-descending">Most complete</option>
+    <option value="completion-count-ascending" {{ if eq .Filters.Sort "completion-count-ascending" }} selected {{end}}>Least completions</option>
+    <option value="completion-count-descending" {{ if eq .Filters.Sort "completion-count-descending" }} selected {{end}}>Most completions</option>
   </select>
 </fieldset>
 <fieldset>
@@ -65,23 +89,33 @@
 
 </div>
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); width: 100%;">
-  {{ range .PlayerCompletions }}
+  {{ range .Stats }}
     <div style="padding: 10px;">
       <h4>{{ .MapName }} </h4>
       <span style="display: grid; grid-template-columns: 1fr 1fr; grid-gap: 10px;">
-      {{ if and (ne .Soldier.Tiers 0) (eq $.Filters.SoldierChecked true) }}
+      {{ if and (ne .Soldier.ZonesTotal 0) (eq $.Filters.SoldierChecked true) }}
       <span>
       <a href="/map?mapid={{ .MapID }}&playerid={{ $.PlayerID }}&class=soldier">
       <image style="height: 24px; width: 24px;" src="https://wiki.teamfortress.com/w/images/9/96/Leaderboard_class_soldier.png" />
-      {{ .Soldier.TotalCompletionPercentage }}%
+      {{ if eq $.Filters.Measurement "zones-finished-percentage"}}
+        {{ .Soldier.ZonesFinishedPercentage }}%
+      {{ end }}
+      {{ if eq $.Filters.Measurement "points-finished-percentage" }}
+        {{ .Soldier.PointsFinishedPercentage }}%
+      {{ end }}  
       </a>
       </span>
       {{ end }}
-      {{ if and (ne .Demoman.Tiers 0) (eq $.Filters.DemomanChecked true) }}
+      {{ if and (ne .Demoman.ZonesTotal 0) (eq $.Filters.DemomanChecked true) }}
       <span>
       <a href="/map?mapid={{ .MapID }}&playerid={{ $.PlayerID }}&class=demoman">
       <image style="height: 24px; width: 24px;" src="https://wiki.teamfortress.com/w/images/4/47/Leaderboard_class_demoman.png" />
-      {{ .Demoman.TotalCompletionPercentage }}%
+      {{ if eq $.Filters.Measurement "zones-finished-percentage"}}
+        {{ .Demoman.ZonesFinishedPercentage }}%
+      {{ end }}
+      {{ if eq $.Filters.Measurement "points-finished-percentage" }}
+        {{ .Demoman.PointsFinishedPercentage }}%
+      {{ end }}  
       </a>
       </span>
       {{ end }}

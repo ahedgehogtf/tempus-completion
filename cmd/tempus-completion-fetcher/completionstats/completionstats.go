@@ -147,6 +147,12 @@ func (a *mapClassAggregator) aggregate(zones []completionstore.PlayerClassZoneRe
 	tierPointsLeft := mapClassStats.TierPointsTotal
 
 	for _, zone := range zones {
+		a.completed++
+
+		if zone.ZoneType == tempushttp.ZoneTypeTrick {
+			continue
+		}
+
 		k := pointValueKey{
 			Tier:     zone.Tier,
 			ZoneType: zone.ZoneType,
@@ -156,7 +162,6 @@ func (a *mapClassAggregator) aggregate(zones []completionstore.PlayerClassZoneRe
 		tierPointsLeft[zone.Tier-1] -= points
 
 		a.pointsAcquired += points
-		a.completed++
 	}
 
 	var incompleteTiers completionstore.Bitmask
@@ -180,4 +185,108 @@ func (a *mapClassAggregator) aggregate(zones []completionstore.PlayerClassZoneRe
 	}
 
 	return stats
+}
+
+func AggregateMapResultStats(results []completionstore.PlayerClassZoneResult, hideCompleted bool) []PlayerMapResultStats {
+	maps := make(map[uint64]PlayerMapResultStats)
+
+	for _, r := range results {
+		if hideCompleted && r.Rank != 0 {
+			continue
+		}
+
+		s, ok := maps[r.MapID]
+		if !ok {
+			s.MapID = r.MapID
+			s.MapName = r.MapName
+		}
+
+		k := pointValueKey{
+			Tier:     r.Tier,
+			ZoneType: r.ZoneType,
+		}
+
+		points := pointValues[k]
+		tiermask := completionstore.IntToMask(r.Tier)
+
+		switch r.Class {
+		case tempushttp.ClassTypeDemoman:
+			s.Demoman.Tiers = completionstore.Set(s.Demoman.Tiers, tiermask)
+			s.Demoman.PointsTotal += points
+			s.Demoman.ZonesTotal++
+			s.Demoman.CompletionsCount += r.Completions
+
+			if s.Demoman.ZonesTotal == 1 || s.Demoman.LeastPopularCompletions > r.Completions {
+				s.Demoman.LeastPopularCompletions = r.Completions
+			}
+
+			if s.Demoman.MostPopularCompletions < r.Completions {
+				s.Demoman.MostPopularCompletions = r.Completions
+			}
+
+			if r.Rank != 0 {
+				s.Demoman.PointsFinished += points
+				s.Demoman.ZonesFinished++
+			}
+
+			s.Demoman.PointsFinishedPercentage = uint8((s.Demoman.PointsFinished * 100) / uint16(s.Demoman.PointsTotal))
+			s.Demoman.ZonesFinishedPercentage = uint8(uint16(s.Demoman.ZonesFinished) * 100 / uint16(s.Demoman.ZonesTotal))
+
+			s.Demoman.Results = append(s.Demoman.Results, r)
+		case tempushttp.ClassTypeSoldier:
+			s.Soldier.Tiers = completionstore.Set(s.Soldier.Tiers, tiermask)
+			s.Soldier.PointsTotal += points
+			s.Soldier.ZonesTotal++
+			s.Soldier.CompletionsCount += r.Completions
+
+			if s.Soldier.ZonesTotal == 1 || s.Soldier.LeastPopularCompletions > r.Completions {
+				s.Soldier.LeastPopularCompletions = r.Completions
+			}
+
+			if s.Soldier.MostPopularCompletions < r.Completions {
+				s.Soldier.MostPopularCompletions = r.Completions
+			}
+
+			if r.Rank != 0 {
+				s.Soldier.PointsFinished += points
+				s.Soldier.ZonesFinished++
+			}
+
+			s.Soldier.PointsFinishedPercentage = uint8((s.Soldier.PointsFinished * 100) / uint16(s.Soldier.PointsTotal))
+			s.Soldier.ZonesFinishedPercentage = uint8(uint16(s.Soldier.ZonesFinished) * 100 / uint16(s.Soldier.ZonesTotal))
+
+			s.Soldier.Results = append(s.Soldier.Results, r)
+		}
+
+		maps[s.MapID] = s
+	}
+
+	resultstats := make([]PlayerMapResultStats, 0, len(maps))
+
+	for _, stat := range maps {
+		resultstats = append(resultstats, stat)
+	}
+
+	return resultstats
+}
+
+type PlayerMapResultStats struct {
+	MapID   uint64
+	MapName string
+	Demoman PlayerClassMapResultStats
+	Soldier PlayerClassMapResultStats
+}
+
+type PlayerClassMapResultStats struct {
+	PointsTotal              uint16
+	ZonesTotal               uint8
+	PointsFinished           uint16
+	ZonesFinished            uint8
+	PointsFinishedPercentage uint8
+	ZonesFinishedPercentage  uint8
+	MostPopularCompletions   uint32
+	LeastPopularCompletions  uint32
+	CompletionsCount         uint32
+	Tiers                    completionstore.Bitmask
+	Results                  []completionstore.PlayerClassZoneResult
 }

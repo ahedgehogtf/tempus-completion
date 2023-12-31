@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"tempus-completion/cmd/tempus-completion-fetcher/completionstore"
 	"tempus-completion/tempushttp"
 	"time"
@@ -451,7 +452,8 @@ ON
 	zone_class_info.class = player_class_zone_results.class AND
 	player_class_zone_results.player_id = ?
 WHERE
-	zone_class_info.map_id = ?;
+	zone_class_info.map_id = ? AND
+	zone_class_info.zone_type != 'trick';
 `
 
 	param := gorqlite.ParameterizedStatement{
@@ -564,93 +566,144 @@ DO UPDATE SET
 	return nil
 }
 
-func (db *DB) GetCompletions(ctx context.Context, playerID uint64) (map[uint64]completionstore.PlayerMapStats, bool, error) {
-	const query = `
+func (db *DB) GetPlayerClassZoneResults(ctx context.Context, playerID uint64, zoneTypes []string, tiers, classes []uint8) ([]completionstore.PlayerClassZoneResult, bool, error) {
+	// TODO: probably don't need custom name, tier, duration, date, rank; just need to know if it was completed for the completions page
+	const qStart = `
 SELECT
-	map_stats.map_id,
-	map_stats.map_name,
-	player_map_stats.player_id,
-	map_stats.data,
-	player_map_stats.data
+	zone_class_info.map_id,
+	zone_class_info.zone_type,
+	zone_class_info.zone_index,
+	zone_class_info.class,
+	zone_class_info.custom_name,
+	zone_class_info.map_name,
+	zone_class_info.tier,
+	zone_class_info.completions,
+	player_class_zone_results.rank,
+	player_class_zone_results.duration,
+	player_class_zone_results.date
 FROM
-	map_stats
+	zone_class_info
 LEFT JOIN
-	player_map_stats
+	player_class_zone_results
 ON
-	map_stats.map_id = player_map_stats.map_id AND
-	player_id = ?;
+	zone_class_info.map_id = player_class_zone_results.map_id AND
+	zone_class_info.zone_type = player_class_zone_results.zone_type AND
+	zone_class_info.zone_index = player_class_zone_results.zone_index AND
+	zone_class_info.class = player_class_zone_results.class AND
+	player_class_zone_results.player_id = ?
+WHERE
 `
+
+	args := make([]any, 0, 1+len(zoneTypes)+len(tiers)+len(classes))
+
+	var whereClause strings.Builder
+
+	args = append(args, playerID)
+
+	whereClause.WriteString("zone_class_info.zone_type IN (")
+	for i, zt := range zoneTypes {
+		if i == 0 {
+			whereClause.Write([]byte("?"))
+		} else {
+			whereClause.Write([]byte(",?"))
+		}
+
+		args = append(args, zt)
+	}
+	whereClause.WriteString(") AND ")
+
+	whereClause.WriteString("zone_class_info.tier IN (")
+	for i, t := range tiers {
+		if i == 0 {
+			whereClause.Write([]byte("?"))
+		} else {
+			whereClause.Write([]byte(",?"))
+		}
+		args = append(args, t)
+	}
+	whereClause.WriteString(") AND ")
+
+	whereClause.WriteString("zone_class_info.class IN (")
+	for i, c := range classes {
+		if i == 0 {
+			whereClause.Write([]byte("?"))
+		} else {
+			whereClause.Write([]byte(",?"))
+		}
+		args = append(args, c)
+	}
+	whereClause.WriteString(");")
+
 	param := gorqlite.ParameterizedStatement{
-		Query:     query,
-		Arguments: []any{playerID},
+		Query:     qStart + whereClause.String(),
+		Arguments: args,
 	}
 
-	results, err := db.conn.QueryOneParameterizedContext(ctx, param)
+	dbresults, err := db.conn.QueryOneParameterizedContext(ctx, param)
 	if err != nil {
-		return nil, false, fmt.Errorf("do query: %w: %w", err, results.Err)
+		return nil, false, fmt.Errorf("do query: %w: %w", err, dbresults.Err)
 	}
 
-	if results.NumRows() == 0 {
+	if dbresults.NumRows() == 0 {
 		return nil, false, nil
 	}
 
-	// TODO: this is *so* slow
-	playerMapStatsData := ""
-	mapStatsData := ""
+	results := make([]completionstore.PlayerClassZoneResult, 0, dbresults.NumRows())
 
-	var mapID int
-	var mapName string
-	var pid gorqlite.NullInt64
+	var (
+		mapID       int
+		zoneType    string
+		zoneIndex   int
+		class       int
+		customName  string
+		mapName     string
+		tier        int
+		completions int
+		rank        int
+		duration    int
+		date        int
+	)
 
-	stats := make(map[uint64]completionstore.PlayerMapStats, results.NumRows())
+	for dbresults.Next() {
+		rank = 0
+		duration = 0
+		date = 0
 
-	for results.Next() {
-		playerMapStatsData = playerMapStatsData[:0]
-		mapStatsData = mapStatsData[:0]
-
-		if err := results.Scan(&mapID, &mapName, &pid, &mapStatsData, &playerMapStatsData); err != nil {
+		if err := dbresults.Scan(
+			&mapID,
+			&zoneType,
+			&zoneIndex,
+			&class,
+			&customName,
+			&mapName,
+			&tier,
+			&completions,
+			&rank,
+			&duration,
+			&date,
+		); err != nil {
 			return nil, false, fmt.Errorf("scan results: %w", err)
 		}
 
-		if pid.Valid {
-			var stat completionstore.PlayerMapStats
-
-			if err := json.Unmarshal([]byte(playerMapStatsData), &stat); err != nil {
-				return nil, false, fmt.Errorf("unmarshal player map stats data: %w", err)
-			}
-
-			stats[uint64(mapID)] = stat
-		} else {
-			var stat completionstore.MapStats
-
-			if err := json.Unmarshal([]byte(mapStatsData), &stat); err != nil {
-				return nil, false, fmt.Errorf("unmarshal map stats data: %w", err)
-			}
-
-			stats[uint64(mapID)] = completionstore.PlayerMapStats{
-				MapID:   uint64(mapID),
-				MapName: mapName,
-				Soldier: completionstore.PlayerClassMapStats{
-					TotalCompletionPercentage: 0,
-					PointCompletionPercentage: 0,
-					Tiers:                     stat.Soldier.Tiers,
-					IncompleteTiers:           stat.Soldier.Tiers,
-					TotalPointsAvailable:      stat.Soldier.PointsTotal,
-					PointsAvailableByTier:     stat.Soldier.TierPointsTotal,
-				},
-				Demoman: completionstore.PlayerClassMapStats{
-					TotalCompletionPercentage: 0,
-					PointCompletionPercentage: 0,
-					Tiers:                     stat.Demoman.Tiers,
-					IncompleteTiers:           stat.Demoman.Tiers,
-					TotalPointsAvailable:      stat.Demoman.PointsTotal,
-					PointsAvailableByTier:     stat.Demoman.TierPointsTotal,
-				},
-			}
+		result := completionstore.PlayerClassZoneResult{
+			MapID:       uint64(mapID),
+			ZoneType:    tempushttp.ZoneType(zoneType),
+			ZoneIndex:   uint8(zoneIndex),
+			PlayerID:    uint64(playerID),
+			Class:       tempushttp.ClassType(class),
+			CustomName:  customName,
+			MapName:     mapName,
+			Tier:        uint8(tier),
+			Rank:        uint32(rank),
+			Duration:    time.Duration(duration),
+			Date:        time.UnixMilli(int64(date)),
+			Completions: uint32(completions),
 		}
+
+		results = append(results, result)
 	}
 
-	return stats, true, nil
+	return results, true, nil
 }
 
 func (db *DB) InsertMaps(ctx context.Context, list *completionstore.MapList) error {
@@ -822,6 +875,42 @@ WHERE
 	return maps, nil
 }
 
+func (db *DB) InsertSteamIDs(ctx context.Context, steamIDs map[string]uint64) error {
+	// steam IDs probably never change association?
+	const query = `
+INSERT INTO
+	steam_ids (
+		steam_id,
+		player_id
+	)
+VALUES
+	(?, ?)
+ON CONFLICT
+	(steam_id)
+DO NOTHING;`
+
+	params := make([]gorqlite.ParameterizedStatement, 0, len(steamIDs))
+
+	for steamID, playerID := range steamIDs {
+		param := gorqlite.ParameterizedStatement{
+			Query:     query,
+			Arguments: []any{steamID, playerID},
+		}
+
+		params = append(params, param)
+	}
+
+	dbresults, err := db.conn.WriteParameterizedContext(ctx, params)
+
+	for _, r := range dbresults {
+		if r.Err != nil {
+			return fmt.Errorf("result error: %w: %w", err, r.Err)
+		}
+	}
+
+	return nil
+}
+
 func (db *DB) GetStalePlayerMaps(ctx context.Context) ([]completionstore.StalePlayerMap, error) {
 	const query = `
 SELECT
@@ -871,6 +960,40 @@ LIMIT 10000;
 	return playerMaps, nil
 }
 
+func (db *DB) GetPlayerBySteamID(ctx context.Context, steamID string) (uint64, bool, error) {
+	const q = `
+SELECT
+	player_id
+FROM
+	steam_ids
+WHERE
+	steam_id = ?;
+`
+	param := gorqlite.ParameterizedStatement{
+		Query:     q,
+		Arguments: []any{steamID},
+	}
+
+	result, err := db.conn.QueryOneParameterizedContext(ctx, param)
+	if err != nil {
+		return 0, false, fmt.Errorf("do query: %w: %w", err, result.Err)
+	}
+
+	if result.NumRows() == 0 {
+		return 0, false, nil
+	}
+
+	var playerID int
+
+	for result.Next() {
+		if err := result.Scan(&playerID); err != nil {
+			return 0, false, fmt.Errorf("scan results: %w", err)
+		}
+	}
+
+	return uint64(playerID), true, nil
+}
+
 func (db *DB) CreateSchema(ctx context.Context) error {
 	const query = `
 CREATE TABLE kv (
@@ -882,6 +1005,12 @@ CREATE TABLE kv (
 
 CREATE INDEX kv_updated_index
 ON kv (updated);
+
+CREATE TABLE steam_ids (
+	steam_id     TEXT    NOT NULL,
+	player_id    INTEGER NOT NULL,
+	PRIMARY KEY (steam_id)
+);
 
 CREATE TABLE zones (
 	map_id     INTEGER NOT NULL,
