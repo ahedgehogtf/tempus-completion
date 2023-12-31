@@ -34,7 +34,7 @@ func AggregateMapStats(zones []completionstore.ZoneClassInfo) map[completionstor
 			ZoneType: info.ZoneType,
 		}
 
-		points := pointValues[k]
+		points := completionPointValues[k]
 
 		stats.Stats.PointsTotal += points
 		stats.Stats.TierPointsTotal[info.Tier-1] += points
@@ -119,7 +119,7 @@ type pointValueKey struct {
 }
 
 var (
-	pointValues = map[pointValueKey]uint16{
+	completionPointValues = map[pointValueKey]uint16{
 		{Tier: 1, ZoneType: tempushttp.ZoneTypeBonus}:  2,
 		{Tier: 2, ZoneType: tempushttp.ZoneTypeBonus}:  5,
 		{Tier: 3, ZoneType: tempushttp.ZoneTypeBonus}:  10,
@@ -139,6 +139,27 @@ var (
 		{Tier: 5, ZoneType: tempushttp.ZoneTypeCourse}: 50,
 		{Tier: 6, ZoneType: tempushttp.ZoneTypeCourse}: 100,
 	}
+
+	topTimesPointValues = map[pointValueKey][10]uint16{
+		{Tier: 1, ZoneType: tempushttp.ZoneTypeBonus}:  {10, 7, 5, 4, 3, 3, 2, 2, 1, 1},
+		{Tier: 2, ZoneType: tempushttp.ZoneTypeBonus}:  {20, 14, 10, 8, 7, 6, 5, 4, 3, 2},
+		{Tier: 3, ZoneType: tempushttp.ZoneTypeBonus}:  {40, 28, 20, 16, 14, 12, 10, 8, 6, 4},
+		{Tier: 4, ZoneType: tempushttp.ZoneTypeBonus}:  {60, 42, 30, 24, 21, 18, 15, 12, 9, 6},
+		{Tier: 5, ZoneType: tempushttp.ZoneTypeBonus}:  {80, 56, 40, 32, 28, 24, 20, 16, 12, 8},
+		{Tier: 6, ZoneType: tempushttp.ZoneTypeBonus}:  {100, 70, 50, 40, 35, 30, 25, 20, 15, 10},
+		{Tier: 1, ZoneType: tempushttp.ZoneTypeMap}:    {200, 140, 100, 80, 70, 60, 50, 40, 30, 20},
+		{Tier: 2, ZoneType: tempushttp.ZoneTypeMap}:    {250, 175, 125, 100, 87, 75, 62, 50, 37, 25},
+		{Tier: 3, ZoneType: tempushttp.ZoneTypeMap}:    {300, 210, 150, 120, 105, 90, 75, 60, 45, 30},
+		{Tier: 4, ZoneType: tempushttp.ZoneTypeMap}:    {350, 244, 175, 140, 122, 105, 87, 70, 52, 35},
+		{Tier: 5, ZoneType: tempushttp.ZoneTypeMap}:    {400, 280, 200, 160, 140, 120, 100, 80, 60, 40},
+		{Tier: 6, ZoneType: tempushttp.ZoneTypeMap}:    {500, 350, 250, 200, 175, 150, 125, 100, 75, 50},
+		{Tier: 1, ZoneType: tempushttp.ZoneTypeCourse}: {100, 70, 50, 40, 35, 30, 25, 20, 15, 10},
+		{Tier: 2, ZoneType: tempushttp.ZoneTypeCourse}: {150, 105, 75, 60, 52, 45, 37, 30, 22, 15},
+		{Tier: 3, ZoneType: tempushttp.ZoneTypeCourse}: {200, 140, 100, 80, 70, 60, 50, 40, 30, 20},
+		{Tier: 4, ZoneType: tempushttp.ZoneTypeCourse}: {250, 175, 125, 100, 87, 75, 62, 50, 37, 25},
+		{Tier: 5, ZoneType: tempushttp.ZoneTypeCourse}: {300, 210, 150, 120, 105, 90, 75, 60, 45, 30},
+		{Tier: 6, ZoneType: tempushttp.ZoneTypeCourse}: {400, 280, 200, 160, 140, 120, 100, 80, 60, 40},
+	}
 )
 
 func (a *mapClassAggregator) aggregate(zones []completionstore.PlayerClassZoneResult, mapClassStats completionstore.MapClassStats) completionstore.PlayerClassMapStats {
@@ -157,7 +178,7 @@ func (a *mapClassAggregator) aggregate(zones []completionstore.PlayerClassZoneRe
 			Tier:     zone.Tier,
 			ZoneType: zone.ZoneType,
 		}
-		points := pointValues[k]
+		points := completionPointValues[k]
 
 		tierPointsLeft[zone.Tier-1] -= points
 
@@ -206,7 +227,7 @@ func AggregateMapResultStats(results []completionstore.PlayerClassZoneResult, hi
 			ZoneType: r.ZoneType,
 		}
 
-		points := pointValues[k]
+		points := completionPointValues[k]
 		tiermask := completionstore.IntToMask(r.Tier)
 
 		switch r.Class {
