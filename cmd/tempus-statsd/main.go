@@ -85,6 +85,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 }
 
 type Store interface {
+	GetPlayerResults(ctx context.Context, playerID uint64) ([]completionstore.PlayerClassZoneResult, bool, error)
 	GetPlayerBySteamID(ctx context.Context, steamID string) (uint64, bool, error)
 	GetPlayerClassZoneResults(ctx context.Context, playerID uint64, zoneTypes []string, tiers, classes []uint8) ([]completionstore.PlayerClassZoneResult, bool, error)
 	GetPlayerMapZones(ctx context.Context, playerID, mapID uint64) (*completionstore.MapZones, bool, error)
@@ -117,7 +118,7 @@ func (h *Handler) serveSearchPage(w http.ResponseWriter, r *http.Request) error 
 	return nil
 }
 
-func (h *Handler) serveResultsPage(w http.ResponseWriter, r *http.Request) error {
+func (h *Handler) serveSearchResultsPage(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 
 	query := q.Get("name")
@@ -236,6 +237,67 @@ func (h *Handler) serveMapPage(w http.ResponseWriter, r *http.Request) error {
 	})
 
 	if err := h.templates.classmap.Execute(w, d); err != nil {
+		return fmt.Errorf("execute template: %w", err)
+	}
+
+	return nil
+}
+
+func (h *Handler) serveResultsPage(w http.ResponseWriter, r *http.Request) error {
+	q := r.URL.Query()
+
+	pid := q.Get("playerid")
+	playerID, err := strconv.ParseUint(pid, 10, 64)
+	if err != nil {
+		return httpserveutil.BadRequest(w, "malformed playerID: %w", err)
+	}
+
+	// class := q.Get("class")
+
+	ctx := r.Context()
+
+	results, ok, err := h.store.GetPlayerResults(ctx, playerID)
+	if err != nil {
+		return httpserveutil.InternalError(w, "get completions: %w", err)
+	}
+
+	if !ok {
+		if err := h.templates.index.Execute(w, nil); err != nil {
+			return fmt.Errorf("execute template: %w", err)
+		}
+
+		return nil
+	}
+
+	type pageData struct {
+		Results  []completionstore.PlayerClassZoneResult
+		PlayerID uint64
+	}
+
+	d := pageData{
+		PlayerID: playerID,
+		Results:  results,
+	}
+
+	// switch class {
+	// case "soldier":
+	// 	d.Completions = mapZones.Soldier
+	// case "demoman":
+	// 	d.Completions = mapZones.Demoman
+	// }
+
+	// sort.Slice(d.Completions, func(i, j int) bool {
+	// 	pi := zoneTypePriorities[d.Completions[i].ZoneType]
+	// 	pj := zoneTypePriorities[d.Completions[j].ZoneType]
+
+	// 	if pi != pj {
+	// 		return pi < pj
+	// 	}
+
+	// 	return d.Completions[i].Tier < d.Completions[j].Tier
+	// })
+
+	if err := h.templates.playerResults.Execute(w, d); err != nil {
 		return fmt.Errorf("execute template: %w", err)
 	}
 
@@ -619,7 +681,8 @@ func (h *Handler) Routes(out io.Writer) map[string]http.Handler {
 		"/completions":    httpserveutil.Handle(out, h.serveCompletionsPage),
 		"/map":            httpserveutil.Handle(out, h.serveMapPage),
 		"/player/search":  httpserveutil.Handle(out, h.serveSearchPage),
-		"/player/results": httpserveutil.Handle(out, h.serveResultsPage),
+		"/player/results": httpserveutil.Handle(out, h.serveSearchResultsPage),
+		"/results":        httpserveutil.Handle(out, h.serveResultsPage),
 	}
 }
 
@@ -645,11 +708,12 @@ func ParseArgs(flags *flag.FlagSet, args []string, stderr io.Writer, usage strin
 }
 
 type PageTemplates struct {
-	index       *template.Template
-	completions *template.Template
-	classmap    *template.Template
-	search      *template.Template
-	results     *template.Template
+	index         *template.Template
+	completions   *template.Template
+	classmap      *template.Template
+	search        *template.Template
+	results       *template.Template
+	playerResults *template.Template
 }
 
 func parseTemplates() (PageTemplates, error) {
@@ -690,6 +754,13 @@ func parseTemplates() (PageTemplates, error) {
 				"static/templates/pages/results.html",
 			},
 			Add: func(t *template.Template) { pt.results = t },
+		},
+		{
+			Files: []string{
+				"static/templates/base.html",
+				"static/templates/pages/player-results.html",
+			},
+			Add: func(t *template.Template) { pt.playerResults = t },
 		},
 	}
 

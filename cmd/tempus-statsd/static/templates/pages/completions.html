@@ -1,6 +1,7 @@
-{{define "title"}}Completions{{end}}
+{{define "title"}}Map Completion{{end}}
 
 {{define "main"}}
+<center><h2>Map completion for <a href="/results?playerid={{ .PlayerID }}"> Player ID {{ .PlayerID }}</a></h2></center>
 <div style="display: flex; justify-content: space-between;">
 <div style="overflow: auto; position: sticky; height: 100%; min-height: 300px; top: 5%; min-width: 225px;">
 <form action="/completions" >
