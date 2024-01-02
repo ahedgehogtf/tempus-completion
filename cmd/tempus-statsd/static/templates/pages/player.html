@@ -1,0 +1,34 @@
+{{define "title"}} Player {{ .PlayerName }} {{end}}
+
+// TODO: /srank logic
+{{define "main"}}
+<div style="padding: 10px;">
+    <div class="section">
+    <h2 style="margin-top: 0px; margin-bottom: 0px;">
+    <a href="http://steamcommunity.com/profiles/{{ .SteamID64 }}">{{ .PlayerName }}</a>
+    </h2>
+    <div>
+    <span> <small>
+      <span>From <b>{{ .Country }}</b></span>
+      <span style="padding-right: 20px; padding-left: 20px;">Joined &nbsp;<b>{{ .Joined.Format "January 2006" }}</b></span>
+      <span style="padding-right: 20px;">Last active &nbsp;<b>{{ .LastActive.Format "January 2, 2006" }}</b></span>
+    </small> </span></div>
+    </div>
+    <div class="section">
+    <h3 style="margin-top: 0px;">Ranking</h3>
+      <span>Overall rank <b>{{ .OverallRank }}</b></span>
+      <span style="padding-right: 20px; padding-left: 20px;"><image style="height: 24px; width: 24px;" src="https://wiki.teamfortress.com/w/images/9/96/Leaderboard_class_soldier.png" /> [ <b style="color: {{ .SoldierTitleColor }};"> {{ .SoldierTitle }} </b> ]&nbsp; rank <b>{{ .SoldierRank }}</b></span>
+      <span><image style="height: 24px; width: 24px;" src="https://wiki.teamfortress.com/w/images/4/47/Leaderboard_class_demoman.png" /> [ <b style="color: {{ .DemomanTitleColor }};"> {{ .DemomanTitle }} </b> ]&nbsp; rank <b>{{ .DemomanRank }}</b></span>
+    </div>
+
+    <div class="section">
+    <h3 style="margin-top: 0px;">Detailed results</h3>
+      <span style="padding-right: 40px;"><a href="/completions?playerid={{ .PlayerID }}">Map completion</a></span>
+      <span><a href="/results?playerid={{ .PlayerID }}">All results</a></span>
+    </div>
+    <div class="section">
+    <h3 style="margin-top: 0px;">Recent personal records</h3>
+    {{ template "results-table" .RecentResults }}
+    </div>
+</div>
+{{end}} 

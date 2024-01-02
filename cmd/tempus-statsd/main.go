@@ -18,8 +18,10 @@ import (
 	"tempus-completion/cmd/tempus-completion-fetcher/rqlitecompletionstore"
 	"tempus-completion/cmd/tempus-statsd/httpserveutil"
 	"tempus-completion/cmd/tempus-statsd/templateutil"
+	"tempus-completion/steamidutil"
 	"tempus-completion/tempushttp"
 	"tempus-completion/tempushttprpc"
+	"time"
 )
 
 func main() {
@@ -85,6 +87,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 }
 
 type Store interface {
+	GetPlayerRecentResults(ctx context.Context, playerID uint64) ([]completionstore.PlayerClassZoneResult, bool, error)
 	GetPlayerResults(ctx context.Context, playerID uint64) ([]completionstore.PlayerClassZoneResult, bool, error)
 	GetPlayerBySteamID(ctx context.Context, steamID string) (uint64, bool, error)
 	GetPlayerClassZoneResults(ctx context.Context, playerID uint64, zoneTypes []string, tiers, classes []uint8) ([]completionstore.PlayerClassZoneResult, bool, error)
@@ -164,6 +167,78 @@ func (h *Handler) serveSearchResultsPage(w http.ResponseWriter, r *http.Request)
 	return nil
 }
 
+func (h *Handler) servePlayerPage(w http.ResponseWriter, r *http.Request) error {
+	q := r.URL.Query()
+
+	pid := q.Get("playerid")
+	if pid == "" {
+		return httpserveutil.BadRequest(w, "must specify playerID")
+	}
+
+	playerID, err := strconv.ParseUint(pid, 10, 64)
+	if err != nil {
+		return httpserveutil.BadRequest(w, "malformed playerID: %w", err)
+	}
+
+	ctx := r.Context()
+
+	stats, err := h.client.GetPlayerStats(ctx, playerID)
+	if err != nil {
+		return httpserveutil.BadRequest(w, "search players and maps: %w", err)
+	}
+
+	steamID64, err := steamidutil.IDToInt64(stats.PlayerInfo.SteamID)
+	if err != nil {
+		return httpserveutil.BadRequest(w, "convert steam id to uint64: %w", err)
+	}
+
+	results, _, err := h.store.GetPlayerRecentResults(ctx, playerID)
+	if err != nil {
+		return httpserveutil.InternalError(w, "get player recent results: %w", err)
+	}
+
+	type pageData struct {
+		PlayerID          uint64
+		PlayerName        string
+		SteamID64         int64
+		Country           string
+		Joined            time.Time
+		LastActive        time.Time
+		OverallRank       uint32
+		SoldierRank       uint32
+		SoldierTitle      string
+		SoldierTitleColor string
+		DemomanRank       uint32
+		DemomanTitle      string
+		DemomanTitleColor string
+
+		RecentResults []completionstore.PlayerClassZoneResult
+	}
+
+	data := pageData{
+		PlayerID:          playerID,
+		PlayerName:        stats.PlayerInfo.Name,
+		SteamID64:         steamID64,
+		Country:           stats.PlayerInfo.Country,
+		Joined:            time.Unix(int64(stats.PlayerInfo.FirstSeen), 0),
+		LastActive:        time.Unix(int64(stats.PlayerInfo.LastSeen), 0),
+		OverallRank:       stats.OverallRankInfo.Rank,
+		SoldierRank:       stats.ClassRankInfo.Soldier.Rank,
+		SoldierTitle:      stats.ClassRankInfo.Soldier.Title,
+		SoldierTitleColor: "var(--text-color)",
+		DemomanRank:       stats.ClassRankInfo.Demoman.Rank,
+		DemomanTitle:      stats.ClassRankInfo.Demoman.Title,
+		DemomanTitleColor: "var(--text-color)",
+		RecentResults:     results,
+	}
+
+	if err := h.templates.player.Execute(w, data); err != nil {
+		return fmt.Errorf("execute template: %w", err)
+	}
+
+	return nil
+}
+
 var (
 	zoneTypePriorities = map[tempushttp.ZoneType]int{
 		tempushttp.ZoneTypeMap:    1,
@@ -177,6 +252,9 @@ func (h *Handler) serveMapPage(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 
 	pid := q.Get("playerid")
+	if pid == "" {
+		return httpserveutil.BadRequest(w, "must specify playerID")
+	}
 	playerID, err := strconv.ParseUint(pid, 10, 64)
 	if err != nil {
 		return httpserveutil.BadRequest(w, "malformed playerID: %w", err)
@@ -247,6 +325,9 @@ func (h *Handler) serveResultsPage(w http.ResponseWriter, r *http.Request) error
 	q := r.URL.Query()
 
 	pid := q.Get("playerid")
+	if pid == "" {
+		return httpserveutil.BadRequest(w, "must specify playerID")
+	}
 	playerID, err := strconv.ParseUint(pid, 10, 64)
 	if err != nil {
 		return httpserveutil.BadRequest(w, "malformed playerID: %w", err)
@@ -269,14 +350,35 @@ func (h *Handler) serveResultsPage(w http.ResponseWriter, r *http.Request) error
 		return nil
 	}
 
+	// TODO: use bitmask for filters, too
+	type pageFilters struct {
+		Tier1Checked         bool
+		Tier2Checked         bool
+		Tier3Checked         bool
+		Tier4Checked         bool
+		Tier5Checked         bool
+		Tier6Checked         bool
+		MapZoneChecked       bool
+		CourseZoneChecked    bool
+		BonusZoneChecked     bool
+		TrickZoneChecked     bool
+		SoldierChecked       bool
+		DemomanChecked       bool
+		HideCompletedChecked bool
+		Sort                 string
+		Measurement          string
+	}
+
 	type pageData struct {
 		Results  []completionstore.PlayerClassZoneResult
 		PlayerID uint64
+		Filters  pageFilters
 	}
 
 	d := pageData{
 		PlayerID: playerID,
 		Results:  results,
+		Filters:  pageFilters{},
 	}
 
 	// switch class {
@@ -682,6 +784,7 @@ func (h *Handler) Routes(out io.Writer) map[string]http.Handler {
 		"/map":            httpserveutil.Handle(out, h.serveMapPage),
 		"/player/search":  httpserveutil.Handle(out, h.serveSearchPage),
 		"/player/results": httpserveutil.Handle(out, h.serveSearchResultsPage),
+		"/player":         httpserveutil.Handle(out, h.servePlayerPage),
 		"/results":        httpserveutil.Handle(out, h.serveResultsPage),
 	}
 }
@@ -714,6 +817,7 @@ type PageTemplates struct {
 	search        *template.Template
 	results       *template.Template
 	playerResults *template.Template
+	player        *template.Template
 }
 
 func parseTemplates() (PageTemplates, error) {
@@ -761,6 +865,14 @@ func parseTemplates() (PageTemplates, error) {
 				"static/templates/pages/player-results.html",
 			},
 			Add: func(t *template.Template) { pt.playerResults = t },
+		},
+		{
+			Files: []string{
+				"static/templates/base.html",
+				"static/templates/pages/player.html",
+				"static/templates/results-table.html",
+			},
+			Add: func(t *template.Template) { pt.player = t },
 		},
 	}
 

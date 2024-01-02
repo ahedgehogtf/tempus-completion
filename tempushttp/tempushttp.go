@@ -137,3 +137,38 @@ type ZoneRecordsResponse struct {
 	CompletionInfo CompletionInfo     `json:"completion_info"`
 	Results        ZoneRecordsResults `json:"results"`
 }
+
+type PlayerStatsPlayerInfo struct {
+	ID          uint64  `json:"id"`
+	SteamID     string  `json:"steamid"`
+	Name        string  `json:"name"`
+	FirstSeen   float64 `json:"first_seen"`
+	LastSeen    float64 `json:"last_seen"`
+	Country     string  `json:"country"`
+	CountryCode string  `json:"country_code"`
+}
+
+type PlayerStatsOverallRankInfo struct {
+	Points      float64 `json:"points"`
+	Rank        uint32  `json:"rank"`
+	TotalRanked uint32  `json:"total_ranked"`
+}
+
+type PlayerStatsClassRankInfoClass struct {
+	Points      float64 `json:"points"`
+	Rank        uint32  `json:"rank"`
+	TotalRanked uint32  `json:"total_ranked"`
+	Title       string  `json:"title"`
+}
+
+type PlayerStatsClassRankInfo struct {
+	Soldier PlayerStatsClassRankInfoClass `json:"3"`
+	Demoman PlayerStatsClassRankInfoClass `json:"4"`
+}
+
+// TODO: parse more
+type GetPlayerStatsResponse struct {
+	PlayerInfo      PlayerStatsPlayerInfo      `json:"player_info"`
+	OverallRankInfo PlayerStatsOverallRankInfo `json:"rank_info"`
+	ClassRankInfo   PlayerStatsClassRankInfo   `json:"class_rank_info"`
+}

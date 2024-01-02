@@ -173,3 +173,38 @@ func (c *Client) GetPlayerZoneClassCompletion(ctx context.Context, data GetPlaye
 
 	return &response, nil
 }
+
+func (c *Client) GetPlayerStats(ctx context.Context, playerID uint64) (*tempushttp.GetPlayerStatsResponse, error) {
+	addr := fmt.Sprintf("%s/players/id/%d/stats", c.address, playerID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, addr, nil)
+	if err != nil {
+		return nil, fmt.Errorf("new request: %w", err)
+	}
+
+	res, err := c.httpc.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("do request: %w", err)
+	}
+
+	defer res.Body.Close()
+
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %d: %s", res.StatusCode, string(b))
+	}
+
+	var response tempushttp.GetPlayerStatsResponse
+
+	decoder := json.NewDecoder(bytes.NewReader(b))
+	// decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&response); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	return &response, nil
+}

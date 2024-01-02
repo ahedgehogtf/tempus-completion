@@ -4,7 +4,7 @@
     <center>
     {{ range .Result.Players }}
     <div>
-      <a href="/completions?playerid={{ .ID}}"> {{ .Name }} </a>
+      <a href="/player?playerid={{ .ID}}"> {{ .Name }} </a>
       </div>
     {{ end }}
     </center>

@@ -1,12 +1,4 @@
-{{define "title"}}Player results{{end}}
-
-{{define "main"}}
-<div style="float: left;"><a href="javascript:window.history.back();">Back</a>
-</div>
-<div style="min-width: 1000px;">
-  <center><h2>
-  All results for Player ID {{ .PlayerID }}
-  </h2></center>
+{{ define "results-table" }}
   <span style="padding: 10px; font-size: 22px; border-bottom-style: dotted; margin-bottom: 5px; display: grid; grid-template-columns: 1fr 1fr 80px 80px 100px 1fr 80px 130px;">
       <span>Map name</span>
       <span>Zone name</span>
@@ -18,8 +10,8 @@
       <span>Completions</span>
     </span>
     <span style="padding: 10px; display: grid; grid-template-columns: 1fr 1fr 80px 80px 100px 1fr 80px 130px;">
-  {{ range .Results }}
-  <span>{{ .MapName }} </span>
+  {{ range . }}
+  <span>{{ .MapName }}</span>
       <span>
       {{ if eq .ZoneType "map" }}
         map
@@ -43,4 +35,4 @@
   {{ end }}
     </span>
     </div>
-{{end}} 
+{{ end }}

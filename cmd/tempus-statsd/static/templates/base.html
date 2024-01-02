@@ -8,6 +8,7 @@
           --text-color: #330746;
           --background-color: pink;
           --main-color: #F0E4D4;
+          --section-color: #f0dcc2;
         }
 
         @media (prefers-color-scheme: dark) {
@@ -15,6 +16,7 @@
             --text-color: #7b8897;
             --background-color: #22272e;
             --main-color: #2d333b;
+            --section-color: #313842;
           }
         }
 
@@ -81,6 +83,13 @@
           color: var(--text-color);
         }
 
+        .section {
+          padding: 10px;
+          background-color: var(--section-color);
+          box-shadow: 0 1px 3px rgba(0,0,0,.25);
+          border-radius: 6px;
+          margin-bottom: 15px;
+        }
       </style>
       <link rel="icon" href="data:,">
     </head>

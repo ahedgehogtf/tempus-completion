@@ -617,6 +617,105 @@ WHERE
 	return results, true, nil
 }
 
+// TODO: consolidate with GetPlayerResults
+func (db *DB) GetPlayerRecentResults(ctx context.Context, playerID uint64) ([]completionstore.PlayerClassZoneResult, bool, error) {
+	const query = `
+SELECT
+	player_class_zone_results.map_id,
+	player_class_zone_results.zone_type,
+	player_class_zone_results.zone_index,
+	player_class_zone_results.class,
+	player_class_zone_results.map_name,
+	player_class_zone_results.custom_name,
+	player_class_zone_results.tier,
+	player_class_zone_results.rank,
+	player_class_zone_results.duration,
+	player_class_zone_results.date,
+	player_class_zone_results.completions
+FROM
+	player_class_zone_results
+WHERE
+	player_class_zone_results.player_id = ? AND
+	player_class_zone_results.zone_type != 'trick'
+ORDER BY
+	date desc
+LIMIT 10;
+`
+
+	param := gorqlite.ParameterizedStatement{
+		Query:     query,
+		Arguments: []any{playerID},
+	}
+
+	dbresults, err := db.conn.QueryOneParameterizedContext(ctx, param)
+	if err != nil {
+		return nil, false, fmt.Errorf("do query: %w: %w", err, dbresults.Err)
+	}
+
+	n := dbresults.NumRows()
+
+	if n == 0 {
+		return nil, false, nil
+	}
+
+	results := make([]completionstore.PlayerClassZoneResult, 0, n)
+
+	var (
+		mapID       int
+		zoneType    string
+		zoneIndex   int
+		class       int
+		mapName     string
+		customName  string
+		tier        int
+		rank        int
+		duration    int
+		date        int
+		completions int
+	)
+
+	for dbresults.Next() {
+		rank = 0
+		duration = 0
+		date = 0
+
+		if err := dbresults.Scan(
+			&mapID,
+			&zoneType,
+			&zoneIndex,
+			&class,
+			&mapName,
+			&customName,
+			&tier,
+			&rank,
+			&duration,
+			&date,
+			&completions,
+		); err != nil {
+			return nil, false, fmt.Errorf("scan results: %w", err)
+		}
+
+		result := completionstore.PlayerClassZoneResult{
+			MapID:       uint64(mapID),
+			ZoneType:    tempushttp.ZoneType(zoneType),
+			ZoneIndex:   uint8(zoneIndex),
+			PlayerID:    uint64(playerID),
+			Class:       tempushttp.ClassType(class),
+			CustomName:  customName,
+			MapName:     mapName,
+			Tier:        uint8(tier),
+			Rank:        uint32(rank),
+			Duration:    time.Duration(duration),
+			Date:        time.UnixMilli(int64(date)),
+			Completions: uint32(completions),
+		}
+
+		results = append(results, result)
+	}
+
+	return results, true, nil
+}
+
 func (db *DB) InsertZoneClassInfo(ctx context.Context, info []completionstore.ZoneClassInfo) error {
 	params := make([]gorqlite.ParameterizedStatement, 0, len(info))
 
