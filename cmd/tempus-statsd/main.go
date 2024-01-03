@@ -141,7 +141,7 @@ func (h *Handler) serveSearchResultsPage(w http.ResponseWriter, r *http.Request)
 			return httpserveutil.BadRequest(w, "could not find Player ID associated with that Steam ID")
 		}
 
-		addr := fmt.Sprintf("/completions?playerid=%d", playerID)
+		addr := fmt.Sprintf("/player?playerid=%d", playerID)
 
 		http.Redirect(w, r, addr, http.StatusPermanentRedirect)
 		return nil
