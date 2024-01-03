@@ -7,40 +7,6 @@
   <center><h2>
   All results for Player ID {{ .PlayerID }}
   </h2></center>
-  <span style="padding: 10px; font-size: 22px; border-bottom-style: dotted; margin-bottom: 5px; display: grid; grid-template-columns: 1fr 1fr 80px 80px 100px 1fr 80px 130px;">
-      <span>Map name</span>
-      <span>Zone name</span>
-      <span>Class</span>
-      <span>Tier</span>
-      <span>Duration</span>
-      <span>Recorded Date</span>
-      <span>Rank</span>
-      <span>Completions</span>
-    </span>
-    <span style="padding: 10px; display: grid; grid-template-columns: 1fr 1fr 80px 80px 100px 1fr 80px 130px;">
-  {{ range .Results }}
-  <span>{{ .MapName }} </span>
-      <span>
-      {{ if eq .ZoneType "map" }}
-        map
-      {{ else }}
-          {{ .ZoneType }} {{ .ZoneIndex }} {{ if ne .CustomName "" }} ({{ .CustomName }}) {{ end }}
-      {{ end }}
-      </span>
-      <span>{{ if eq .Class 3}}<image style="height: 24px; width: 24px;" src="https://wiki.teamfortress.com/w/images/9/96/Leaderboard_class_soldier.png" />{{ else }}<image style="height: 24px; width: 24px;" src="https://wiki.teamfortress.com/w/images/4/47/Leaderboard_class_demoman.png" />{{ end }}</span>
-      
-      <span>T{{ .Tier }}</span>
-      {{ if gt .Rank 0 }}
-        <span>{{ roundDuration .Duration }}</span>
-        <span>{{ .Date.Format "02 Jan 2006 15:04 MST" }}</span>
-        <span>{{ .Rank }}</span>
-        {{ else }}
-        <span></span>
-        <span></span>
-        <span></span>
-      {{ end }}
-      <span> {{ .Completions }} </span>
-  {{ end }}
-    </span>
+  {{ template "results-table" .Results }}
     </div>
 {{end}} 

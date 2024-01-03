@@ -339,8 +339,6 @@ func (h *Handler) serveResultsPage(w http.ResponseWriter, r *http.Request) error
 		return httpserveutil.BadRequest(w, "malformed playerID: %w", err)
 	}
 
-	// class := q.Get("class")
-
 	ctx := r.Context()
 
 	results, ok, err := h.store.GetPlayerResults(ctx, playerID)
@@ -386,24 +384,6 @@ func (h *Handler) serveResultsPage(w http.ResponseWriter, r *http.Request) error
 		Results:  results,
 		Filters:  pageFilters{},
 	}
-
-	// switch class {
-	// case "soldier":
-	// 	d.Completions = mapZones.Soldier
-	// case "demoman":
-	// 	d.Completions = mapZones.Demoman
-	// }
-
-	// sort.Slice(d.Completions, func(i, j int) bool {
-	// 	pi := zoneTypePriorities[d.Completions[i].ZoneType]
-	// 	pj := zoneTypePriorities[d.Completions[j].ZoneType]
-
-	// 	if pi != pj {
-	// 		return pi < pj
-	// 	}
-
-	// 	return d.Completions[i].Tier < d.Completions[j].Tier
-	// })
 
 	if err := h.templates.playerResults.Execute(w, d); err != nil {
 		return fmt.Errorf("execute template: %w", err)
