@@ -6,34 +6,5 @@
   <center><h2>
     {{ .MapName }}
   </h2></center>
-  <span style="padding: 10px; font-size: 22px; border-bottom-style: dotted; margin-bottom: 5px; display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr;">
-      <span>Zone name</span>
-      <span>Tier</span>
-      <span>Duration</span>
-      <span>Recorded Date</span>
-      <span>Rank</span>
-      <span>Completions</span>
-    </span>
-    <span style="padding: 10px; display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr;">
-  {{ range .Completions }}
-      <span>
-      {{ if eq .ZoneType "map" }}
-        map
-      {{ else }}
-          {{ .ZoneType }} {{ .ZoneIndex }} {{ if ne .CustomName "" }} ({{ .CustomName }}) {{ end }}
-      {{ end }}
-      </span>
-      <span>T{{ .Tier }}</span>
-      {{ if ne .Duration 0 }}
-        <span>{{ .Duration }}</span>
-        <span>{{ .Recorded.Format "02 Jan 2006 15:04 MST" }}</span>
-        <span>{{ .Rank }}</span>
-        {{ else }}
-        <span></span>
-        <span></span>
-        <span></span>
-      {{ end }}
-      <span> {{ .Completions }} </span>
-  {{ end }}
-    </span>
+  {{ template "results-table" .Results }}
 {{end}} 

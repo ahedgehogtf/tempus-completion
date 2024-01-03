@@ -427,100 +427,6 @@ WHERE
 	return nil
 }
 
-func (db *DB) GetPlayerMapZones(ctx context.Context, playerID, mapID uint64) (*completionstore.MapZones, bool, error) {
-
-	const query = `
-SELECT
-	zone_class_info.zone_type,
-	zone_class_info.zone_index,
-	zone_class_info.class,
-	zone_class_info.map_name,
-	zone_class_info.custom_name,
-	zone_class_info.tier,
-	player_class_zone_results.rank,
-	player_class_zone_results.duration,
-	player_class_zone_results.date,
-	zone_class_info.completions
-FROM
-	zone_class_info
-LEFT JOIN
-	player_class_zone_results
-ON
-	zone_class_info.map_id = player_class_zone_results.map_id AND
-	zone_class_info.zone_type = player_class_zone_results.zone_type AND
-	zone_class_info.zone_index = player_class_zone_results.zone_index AND
-	zone_class_info.class = player_class_zone_results.class AND
-	player_class_zone_results.player_id = ?
-WHERE
-	zone_class_info.map_id = ? AND
-	zone_class_info.zone_type != 'trick';
-`
-
-	param := gorqlite.ParameterizedStatement{
-		Query:     query,
-		Arguments: []any{playerID, mapID},
-	}
-
-	results, err := db.conn.QueryOneParameterizedContext(ctx, param)
-	if err != nil {
-		return nil, false, fmt.Errorf("do query: %w: %w", err, results.Err)
-	}
-
-	n := results.NumRows()
-
-	if n == 0 {
-		return nil, false, nil
-	}
-
-	soldier := make([]completionstore.PlayerMapClassZoneCompletion, 0, n)
-	demoman := make([]completionstore.PlayerMapClassZoneCompletion, 0, n)
-	var mapName string
-
-	for results.Next() {
-		var (
-			zoneType    string
-			zoneIndex   int
-			class       int
-			customName  string
-			tier        int
-			rank        int
-			duration    int
-			date        int
-			completions int
-		)
-
-		if err := results.Scan(&zoneType, &zoneIndex, &class, &mapName, &customName, &tier, &rank, &duration, &date, &completions); err != nil {
-			return nil, false, fmt.Errorf("scan results: %w", err)
-		}
-
-		c := completionstore.PlayerMapClassZoneCompletion{
-			ZoneType:    tempushttp.ZoneType(zoneType),
-			ZoneIndex:   uint8(zoneIndex),
-			CustomName:  customName,
-			Tier:        uint8(tier),
-			Duration:    time.Duration(duration),
-			Recorded:    time.UnixMilli(int64(date)),
-			Rank:        uint32(rank),
-			Completions: uint32(completions),
-		}
-
-		switch tempushttp.ClassType(class) {
-		case tempushttp.ClassTypeDemoman:
-			demoman = append(demoman, c)
-		case tempushttp.ClassTypeSoldier:
-			soldier = append(soldier, c)
-		}
-	}
-
-	zones := &completionstore.MapZones{
-		MapName: mapName,
-		Soldier: soldier,
-		Demoman: demoman,
-	}
-
-	return zones, true, nil
-}
-
 func (db *DB) GetPlayerResults(ctx context.Context, playerID uint64) ([]completionstore.PlayerClassZoneResult, bool, error) {
 
 	const query = `
@@ -604,6 +510,107 @@ ORDER BY
 			ZoneIndex:   uint8(zoneIndex),
 			PlayerID:    uint64(playerID),
 			Class:       tempushttp.ClassType(class),
+			CustomName:  customName,
+			MapName:     mapName,
+			Tier:        uint8(tier),
+			Rank:        uint32(rank),
+			Duration:    time.Duration(duration),
+			Date:        time.UnixMilli(int64(date)),
+			Completions: uint32(completions),
+		}
+
+		results = append(results, result)
+	}
+
+	return results, true, nil
+}
+
+func (db *DB) GetPlayerMapClassResults(ctx context.Context, playerID, mapID uint64, class tempushttp.ClassType) ([]completionstore.PlayerClassZoneResult, bool, error) {
+
+	const query = `
+SELECT
+	zone_class_info.zone_type,
+	zone_class_info.zone_index,
+	zone_class_info.map_name,
+	zone_class_info.custom_name,
+	zone_class_info.tier,
+	player_class_zone_results.rank,
+	player_class_zone_results.duration,
+	player_class_zone_results.date,
+	zone_class_info.completions
+FROM
+	zone_class_info
+LEFT JOIN
+	player_class_zone_results
+ON
+	zone_class_info.map_id = player_class_zone_results.map_id AND
+	zone_class_info.zone_type = player_class_zone_results.zone_type AND
+	zone_class_info.zone_index = player_class_zone_results.zone_index AND
+	zone_class_info.class = player_class_zone_results.class AND
+	player_class_zone_results.player_id = ?
+WHERE
+	zone_class_info.map_id = ? AND
+	zone_class_info.class = ? AND
+	zone_class_info.zone_type != 'trick'
+ORDER BY
+	player_class_zone_results.date DESC;
+`
+
+	param := gorqlite.ParameterizedStatement{
+		Query:     query,
+		Arguments: []any{playerID, mapID, class},
+	}
+
+	dbresults, err := db.conn.QueryOneParameterizedContext(ctx, param)
+	if err != nil {
+		return nil, false, fmt.Errorf("do query: %w: %w", err, dbresults.Err)
+	}
+
+	n := dbresults.NumRows()
+
+	if n == 0 {
+		return nil, false, nil
+	}
+
+	results := make([]completionstore.PlayerClassZoneResult, 0, n)
+
+	var (
+		zoneType    string
+		zoneIndex   int
+		mapName     string
+		customName  string
+		tier        int
+		rank        int
+		duration    int
+		date        int
+		completions int
+	)
+
+	for dbresults.Next() {
+		rank = 0
+		duration = 0
+		date = 0
+
+		if err := dbresults.Scan(
+			&zoneType,
+			&zoneIndex,
+			&mapName,
+			&customName,
+			&tier,
+			&rank,
+			&duration,
+			&date,
+			&completions,
+		); err != nil {
+			return nil, false, fmt.Errorf("scan results: %w", err)
+		}
+
+		result := completionstore.PlayerClassZoneResult{
+			MapID:       mapID,
+			ZoneType:    tempushttp.ZoneType(zoneType),
+			ZoneIndex:   uint8(zoneIndex),
+			PlayerID:    playerID,
+			Class:       class,
 			CustomName:  customName,
 			MapName:     mapName,
 			Tier:        uint8(tier),

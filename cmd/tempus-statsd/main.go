@@ -87,11 +87,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 }
 
 type Store interface {
+	GetPlayerMapClassResults(ctx context.Context, playerID, mapID uint64, class tempushttp.ClassType) ([]completionstore.PlayerClassZoneResult, bool, error)
 	GetPlayerRecentResults(ctx context.Context, playerID uint64) ([]completionstore.PlayerClassZoneResult, bool, error)
 	GetPlayerResults(ctx context.Context, playerID uint64) ([]completionstore.PlayerClassZoneResult, bool, error)
 	GetPlayerBySteamID(ctx context.Context, steamID string) (uint64, bool, error)
 	GetPlayerClassZoneResults(ctx context.Context, playerID uint64, zoneTypes []string, tiers, classes []uint8) ([]completionstore.PlayerClassZoneResult, bool, error)
-	GetPlayerMapZones(ctx context.Context, playerID, mapID uint64) (*completionstore.MapZones, bool, error)
 }
 
 type Handler struct {
@@ -268,11 +268,23 @@ func (h *Handler) serveMapPage(w http.ResponseWriter, r *http.Request) error {
 
 	class := q.Get("class")
 
+	var ct tempushttp.ClassType
+
+	switch class {
+	case "soldier":
+		ct = tempushttp.ClassTypeSoldier
+	case "demoman":
+		ct = tempushttp.ClassTypeDemoman
+	default:
+		return httpserveutil.BadRequest(w, "class '%s' is not supported", class)
+	}
+
 	ctx := r.Context()
 
-	mapZones, ok, err := h.store.GetPlayerMapZones(ctx, playerID, mapID)
+	results, ok, err := h.store.GetPlayerMapClassResults(ctx, playerID, mapID, ct)
+
 	if err != nil {
-		return httpserveutil.InternalError(w, "get completions: %w", err)
+		return httpserveutil.InternalError(w, "get results: %w", err)
 	}
 
 	if !ok {
@@ -284,34 +296,28 @@ func (h *Handler) serveMapPage(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	type pageData struct {
-		Completions []completionstore.PlayerMapClassZoneCompletion
-		MapName     string
-		PlayerID    uint64
-		Class       string
+		Results  []completionstore.PlayerClassZoneResult
+		MapName  string
+		PlayerID uint64
+		Class    string
 	}
 
 	d := pageData{
 		PlayerID: playerID,
 		Class:    class,
-		MapName:  mapZones.MapName,
+		MapName:  results[0].MapName,
+		Results:  results,
 	}
 
-	switch class {
-	case "soldier":
-		d.Completions = mapZones.Soldier
-	case "demoman":
-		d.Completions = mapZones.Demoman
-	}
-
-	sort.Slice(d.Completions, func(i, j int) bool {
-		pi := zoneTypePriorities[d.Completions[i].ZoneType]
-		pj := zoneTypePriorities[d.Completions[j].ZoneType]
+	sort.Slice(d.Results, func(i, j int) bool {
+		pi := zoneTypePriorities[d.Results[i].ZoneType]
+		pj := zoneTypePriorities[d.Results[j].ZoneType]
 
 		if pi != pj {
 			return pi < pj
 		}
 
-		return d.Completions[i].Tier < d.Completions[j].Tier
+		return d.Results[i].Tier < d.Results[j].Tier
 	})
 
 	if err := h.templates.classmap.Execute(w, d); err != nil {
@@ -842,6 +848,7 @@ func parseTemplates() (PageTemplates, error) {
 			Files: []string{
 				"static/templates/base.html",
 				"static/templates/pages/class-map.html",
+				"static/templates/results-table.html",
 			},
 			Add: func(t *template.Template) { pt.classmap = t },
 		},
@@ -863,6 +870,7 @@ func parseTemplates() (PageTemplates, error) {
 			Files: []string{
 				"static/templates/base.html",
 				"static/templates/pages/player-results.html",
+				"static/templates/results-table.html",
 			},
 			Add: func(t *template.Template) { pt.playerResults = t },
 		},

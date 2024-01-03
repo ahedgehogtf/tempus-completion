@@ -18,20 +18,6 @@ type MapList struct {
 	Response tempushttp.GetDetailedMapListResponse
 }
 
-type PlayerMapClassZoneCompletion struct {
-	ZoneType    tempushttp.ZoneType `json:"zone_type"`
-	ZoneIndex   uint8               `json:"zone_index"`
-	CustomName  string              `json:"custom_name"`
-	Tier        uint8               `json:"tier"`
-	Duration    time.Duration       `json:"duration"`
-	Recorded    time.Time           `json:"recorded"`
-	Rank        uint32              `json:"rank"`
-	Completions uint32              `json:"completions"`
-	Demo        string              `json:"demo"`
-	StartTick   uint64              `json:"start_tick"`
-	EndTick     uint64              `json:"end_tick"`
-}
-
 type PlayerMapStats struct {
 	MapID   uint64              `json:"map_id"`
 	MapName string              `json:"map_name"`
@@ -90,12 +76,6 @@ type PlayerClassMapStats struct {
 	IncompleteTiers           Bitmask   `json:"incomplete_tiers"`
 	TotalPointsAvailable      uint16    `json:"total_points_available"`
 	PointsAvailableByTier     [6]uint16 `json:"points_available_by_tier"`
-}
-
-type MapZones struct {
-	MapName string                         `json:"map_name"`
-	Soldier []PlayerMapClassZoneCompletion `json:"soldier"`
-	Demoman []PlayerMapClassZoneCompletion `json:"demoman"`
 }
 
 type PlayerClassZoneResult struct {
