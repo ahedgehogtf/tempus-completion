@@ -30,8 +30,8 @@
       <span>{{ if eq .Class 3}}<image style="height: 24px; width: 24px;" src="https://wiki.teamfortress.com/w/images/9/96/Leaderboard_class_soldier.png" />{{ else }}<image style="height: 24px; width: 24px;" src="https://wiki.teamfortress.com/w/images/4/47/Leaderboard_class_demoman.png" />{{ end }}</span>
       
       <span>T{{ .Tier }}</span>
-      {{ if ne .Duration 0 }}
-        <span>{{ .Duration }}</span>
+      {{ if gt .Rank 0 }}
+        <span>{{ roundDuration .Duration }}</span>
         <span>{{ .Date.Format "02 Jan 2006 15:04 MST" }}</span>
         <span>{{ .Rank }}</span>
         {{ else }}
