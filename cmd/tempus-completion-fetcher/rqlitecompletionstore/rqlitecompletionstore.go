@@ -540,7 +540,9 @@ FROM
 	player_class_zone_results
 WHERE
 	player_class_zone_results.player_id = ? AND
-	player_class_zone_results.zone_type != 'trick';
+	player_class_zone_results.zone_type != 'trick'
+ORDER BY
+	player_class_zone_results.date DESC;
 `
 
 	param := gorqlite.ParameterizedStatement{
