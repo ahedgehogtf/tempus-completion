@@ -254,7 +254,7 @@ func (f *Fetcher) fetchPlayerClassZoneResults(ctx context.Context, zones []compl
 						Tier:        uint8(response.TierInfo.Soldier),
 						Updated:     updated,
 						Rank:        uint32(r.Rank),
-						Duration:    time.Second * time.Duration(r.Duration),
+						Duration:    time.Duration(float64(time.Second) * r.Duration),
 						Date:        time.Unix(int64(r.Date), 0),
 						Completions: uint32(ns),
 					}
@@ -275,7 +275,7 @@ func (f *Fetcher) fetchPlayerClassZoneResults(ctx context.Context, zones []compl
 						Tier:        uint8(response.TierInfo.Demoman),
 						Updated:     updated,
 						Rank:        uint32(r.Rank),
-						Duration:    time.Second * time.Duration(r.Duration),
+						Duration:    time.Duration(float64(time.Second) * r.Duration),
 						Date:        time.Unix(int64(r.Date), 0),
 						Completions: uint32(nd),
 					}
