@@ -3,7 +3,7 @@
 {{define "main"}}
 <div style="float: left;"><a href="javascript:window.history.back();">Back</a>
 </div>
-<div style="min-width: 1000px;">
+<div style="min-width: 1200px;">
   <center><h2>
   All results for Player ID {{ .PlayerID }}
   </h2></center>
@@ -12,9 +12,33 @@
     {{ template "tiers-filter" .Filters }}
     {{ template "zone-types-filter" .Filters }}
 <fieldset style="border: none;">
+  <legend>Sort</legend>
+  <select name="sort" id="sort">
+    <option value="date-descending" {{ if eq .Filters.Sort "date-descending" }} selected {{end}}>Newest</option>
+    <option value="date-ascending" {{ if eq .Filters.Sort "date-ascending" }} selected {{end}}>Oldest</option>
+    <option {{ if eq .Filters.Sort "map-name-ascending" }} selected {{end}} value="map-name-ascending">Map name (A-Z)</option>
+    <option {{ if eq .Filters.Sort "map-name-descending" }} selected {{end}} value="map-name-descending">Map name (Z-A)</option>
+    <option value="tier-ascending" {{ if eq .Filters.Sort "tier-ascending" }} selected {{end}} >Lowest tier</option>
+    <option {{ if eq .Filters.Sort "tier-descending" }} selected {{end}} value="tier-descending">Highest tier</option>
+    <option value="completion-count-ascending" {{ if eq .Filters.Sort "completion-count-ascending" }} selected {{end}}>Least completions</option>
+    <option value="completion-count-descending" {{ if eq .Filters.Sort "completion-count-descending" }} selected {{end}}>Most completions</option>
+    <option value="duration-ascending" {{ if eq .Filters.Sort "duration-ascending" }} selected {{end}}>Lowest duration</option>
+    <option value="duration-descending" {{ if eq .Filters.Sort "duration-descending" }} selected {{end}}>Highest duration</option>
+    <option value="rank-ascending" {{ if eq .Filters.Sort "rank-ascending" }} selected {{end}}>Best rank</option>
+    <option value="rank-descending" {{ if eq .Filters.Sort "rank-descending" }} selected {{end}}>Worst rank</option>
+  </select>
+</fieldset>
+<fieldset style="border: none;">
 <br>
+<span>
+    <input type="checkbox" id="top-times-only" name="top-times-only" value="true" {{ if .Filters.TopTimesOnlyChecked }} checked {{ end }} />
+    <label for="top-times-only">Top times only</label>
+    </span>
+<span>
+&nbsp;
 <input type="text" hidden name="playerid" value="{{ .PlayerID }}" />
 <input type="submit" value="Apply">
+</span>
 </fieldset>
   </form>
   {{ template "results-table" .Results }}

@@ -346,21 +346,21 @@ func (h *Handler) serveResultsPage(w http.ResponseWriter, r *http.Request) error
 	}
 
 	type pageFilters struct {
-		Tier1Checked         bool
-		Tier2Checked         bool
-		Tier3Checked         bool
-		Tier4Checked         bool
-		Tier5Checked         bool
-		Tier6Checked         bool
-		MapZoneChecked       bool
-		CourseZoneChecked    bool
-		BonusZoneChecked     bool
-		TrickZoneChecked     bool
-		SoldierChecked       bool
-		DemomanChecked       bool
-		HideCompletedChecked bool
-		Sort                 string
-		Measurement          string
+		Tier1Checked        bool
+		Tier2Checked        bool
+		Tier3Checked        bool
+		Tier4Checked        bool
+		Tier5Checked        bool
+		Tier6Checked        bool
+		MapZoneChecked      bool
+		CourseZoneChecked   bool
+		BonusZoneChecked    bool
+		TrickZoneChecked    bool
+		SoldierChecked      bool
+		DemomanChecked      bool
+		TopTimesOnlyChecked bool
+		Sort                string
+		Measurement         string
 	}
 
 	var pf pageFilters
@@ -452,6 +452,29 @@ func (h *Handler) serveResultsPage(w http.ResponseWriter, r *http.Request) error
 		}
 
 		return nil
+	}
+
+	pf.TopTimesOnlyChecked = q.Get("top-times-only") == "true"
+
+	if pf.TopTimesOnlyChecked {
+		var j int
+
+		for i := 0; i < len(results); i++ {
+			r := results[i]
+			if r.Rank > 10 {
+				continue
+			}
+
+			results[j] = r
+			j++
+		}
+
+		results = results[:j]
+	}
+
+	pf.Sort = q.Get("sort")
+	if sf, ok := resultsSortFuncs[pf.Sort]; ok {
+		sf(results)
 	}
 
 	type pageData struct {
@@ -637,7 +660,7 @@ type sortFuncsKey struct {
 }
 
 var (
-	sortFuncs = map[sortFuncsKey]SortFunc{
+	completionSortFuncs = map[sortFuncsKey]SortFunc{
 		{sortType: "tier-ascending", class: "both"}:                 SortBothTierAscending,
 		{sortType: "tier-ascending", class: "soldier"}:              SortSoldierTierAscending,
 		{sortType: "tier-ascending", class: "demoman"}:              SortDemomanTierAscending,
@@ -666,9 +689,97 @@ var (
 		{sortType: "completion-count-descending", class: "soldier"}: SortSoldierCompletionCountDescending,
 		{sortType: "completion-count-descending", class: "demoman"}: SortDemomanCompletionCountDescending,
 	}
+
+	resultsSortFuncs = map[string]ResultsSortFunc{
+		"map-name-ascending":          SortMapNameAscendingResults,
+		"map-name-descending":         SortMapNameDescendingResults,
+		"completion-count-ascending":  SortCompletionCountAscendingResults,
+		"completion-count-descending": SortCompletionCountDescendingResults,
+		"tier-ascending":              SortTierAscendingResults,
+		"tier-descending":             SortTierDescendingResults,
+		"duration-ascending":          SortDurationAscendingResults,
+		"duration-descending":         SortDurationDescendingResults,
+		"date-ascending":              SortDateAscendingResults,
+		"date-descending":             SortDateDescendingResults,
+		"rank-ascending":              SortRankAscendingResults,
+		"rank-descending":             SortRankDescendingResults,
+	}
 )
 
+func SortMapNameAscendingResults(results []completionstore.PlayerClassZoneResult) {
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].MapName < results[j].MapName
+	})
+}
+
+func SortMapNameDescendingResults(results []completionstore.PlayerClassZoneResult) {
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].MapName > results[j].MapName
+	})
+}
+
+func SortCompletionCountAscendingResults(results []completionstore.PlayerClassZoneResult) {
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].Completions < results[j].Completions
+	})
+}
+
+func SortCompletionCountDescendingResults(results []completionstore.PlayerClassZoneResult) {
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].Completions > results[j].Completions
+	})
+}
+
+func SortTierAscendingResults(results []completionstore.PlayerClassZoneResult) {
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].Tier < results[j].Tier
+	})
+}
+
+func SortTierDescendingResults(results []completionstore.PlayerClassZoneResult) {
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].Tier > results[j].Tier
+	})
+}
+
+func SortDurationAscendingResults(results []completionstore.PlayerClassZoneResult) {
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].Duration < results[j].Duration
+	})
+}
+
+func SortDurationDescendingResults(results []completionstore.PlayerClassZoneResult) {
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].Duration > results[j].Duration
+	})
+}
+
+func SortRankAscendingResults(results []completionstore.PlayerClassZoneResult) {
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].Rank < results[j].Rank
+	})
+}
+
+func SortRankDescendingResults(results []completionstore.PlayerClassZoneResult) {
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].Rank > results[j].Rank
+	})
+}
+
+func SortDateAscendingResults(results []completionstore.PlayerClassZoneResult) {
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].Date.Before(results[j].Date)
+	})
+}
+
+func SortDateDescendingResults(results []completionstore.PlayerClassZoneResult) {
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].Date.After(results[j].Date)
+	})
+}
+
 type SortFunc func([]completionstats.PlayerMapResultStats)
+type ResultsSortFunc func([]completionstore.PlayerClassZoneResult)
 
 func (h *Handler) serveCompletionsPage(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
@@ -808,7 +919,7 @@ func (h *Handler) serveCompletionsPage(w http.ResponseWriter, r *http.Request) e
 
 	stats := completionstats.AggregateMapResultStats(results, hideCompleted)
 
-	if sf, ok := sortFuncs[sfk]; ok {
+	if sf, ok := completionSortFuncs[sfk]; ok {
 		sf(stats)
 	}
 	measurement := q.Get("measurement")
