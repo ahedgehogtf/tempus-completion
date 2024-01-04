@@ -42,7 +42,6 @@
     <input type="checkbox" id="t6" name="tier" value="t6" {{ if .Filters.Tier6Checked }} checked {{ end }} />
     <label for="t6">T6</label>
   </div>
-  <input type="text" hidden name="playerid" value="{{ .PlayerID }}" />
 </fieldset>
 <fieldset>
   <legend>Zone types</legend>
@@ -84,6 +83,7 @@
     <input type="checkbox" id="hide-completed" name="hide-completed" value="true" {{ if .Filters.HideCompletedChecked }} checked {{ end }} />
     <label for="hide-completed">Hide Completed</label>
   </div>
+<input type="text" hidden name="playerid" value="{{ .PlayerID }}" />
 <input type="submit" value="Apply">
 </fieldset>
 </form>

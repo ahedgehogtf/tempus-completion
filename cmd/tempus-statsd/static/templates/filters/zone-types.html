@@ -1,0 +1,17 @@
+{{ define "zone-types-filter" }}
+<fieldset style="border: none;">
+  <legend>Zone types</legend>
+  <span>
+    <input type="checkbox" id="map" name="zone-type" value="map" {{ if .MapZoneChecked }} checked {{ end }} />
+    <label for="map">Map</label>
+  </span>
+  <span>
+    <input type="checkbox" id="course" name="zone-type" value="course" {{ if .CourseZoneChecked }} checked {{ end }} />
+    <label for="course">Course</label>
+    </span>
+    <span>
+    <input type="checkbox" id="bonus" name="zone-type" value="bonus" {{ if .BonusZoneChecked }} checked {{ end }} />
+    <label for="bonus">Bonus</label>
+    </span>
+</fieldset>
+{{ end }}

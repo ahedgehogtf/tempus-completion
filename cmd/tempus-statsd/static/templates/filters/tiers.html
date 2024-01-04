@@ -1,0 +1,29 @@
+{{ define "tiers-filter" }}
+<fieldset style="border: none;">
+  <legend>Tiers</legend>
+  <span>
+    <input type="checkbox" id="t1" name="tier" value="t1" {{ if .Tier1Checked }} checked {{ end }} />
+    <label for="t1">T1</label>
+  </span>
+  <span>
+    <input type="checkbox" id="t2" name="tier" value="t2" {{ if .Tier2Checked }} checked {{ end }}/>
+    <label for="t2">T2</label>
+  </span>
+  <span>
+    <input type="checkbox" id="t3" name="tier" value="t3" {{ if .Tier3Checked }} checked {{ end }}/>
+    <label for="t3">T3</label>
+  </span>
+  <span>
+    <input type="checkbox" id="t4" name="tier" value="t4" {{ if .Tier4Checked }} checked {{ end }} />
+    <label for="t4">T4</label>
+  </span>
+  <span>
+    <input type="checkbox" id="t5" name="tier" value="t5" {{ if .Tier5Checked }} checked {{ end }} />
+    <label for="t5">T5</label>
+  </span>
+  <span>
+    <input type="checkbox" id="t6" name="tier" value="t6" {{ if .Tier6Checked }} checked {{ end }} />
+    <label for="t6">T6</label>
+  </span>
+</fieldset>
+{{ end }}

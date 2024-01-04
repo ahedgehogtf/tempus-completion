@@ -1,0 +1,13 @@
+{{ define "class-filter" }}
+<fieldset style="border: none;">
+  <legend>Class</legend>
+  <span>
+    <input type="checkbox" id="soldier" name="class" value="soldier" {{ if .SoldierChecked }} checked {{ end }} />
+    <label for="soldier">Soldier</label>
+  </span>
+  <span>
+    <input type="checkbox" id="demoman" name="class" value="demoman" {{ if .DemomanChecked }} checked {{ end }} />
+    <label for="demoman">Demoman</label>
+  </span>
+</fieldset>
+{{ end }}

@@ -7,6 +7,16 @@
   <center><h2>
   All results for Player ID {{ .PlayerID }}
   </h2></center>
+  <form action="/results" style="display: flex; gap: 10px;">
+    {{ template "class-filter" .Filters }}
+    {{ template "tiers-filter" .Filters }}
+    {{ template "zone-types-filter" .Filters }}
+<fieldset style="border: none;">
+<br>
+<input type="text" hidden name="playerid" value="{{ .PlayerID }}" />
+<input type="submit" value="Apply">
+</fieldset>
+  </form>
   {{ template "results-table" .Results }}
     </div>
 {{end}} 

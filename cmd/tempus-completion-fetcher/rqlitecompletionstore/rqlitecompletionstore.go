@@ -489,8 +489,6 @@ WHERE
 		Arguments: args,
 	}
 
-	fmt.Println(param.Query)
-
 	dbresults, err := db.conn.QueryOneParameterizedContext(ctx, param)
 	if err != nil {
 		return nil, false, fmt.Errorf("do query: %w: %w", err, dbresults.Err)
