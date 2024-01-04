@@ -427,9 +427,9 @@ WHERE
 	return nil
 }
 
-func (db *DB) GetPlayerResults(ctx context.Context, playerID uint64) ([]completionstore.PlayerClassZoneResult, bool, error) {
+func (db *DB) GetPlayerResults(ctx context.Context, playerID uint64, zoneTypes []string, tiers, classes []uint8) ([]completionstore.PlayerClassZoneResult, bool, error) {
 
-	const query = `
+	const qstart = `
 SELECT
 	player_class_zone_results.map_id,
 	player_class_zone_results.zone_type,
@@ -446,15 +446,50 @@ FROM
 	player_class_zone_results
 WHERE
 	player_class_zone_results.player_id = ? AND
-	player_class_zone_results.zone_type != 'trick'
-ORDER BY
-	player_class_zone_results.date DESC;
+	player_class_zone_results.zone_type != 'trick' AND
 `
 
-	param := gorqlite.ParameterizedStatement{
-		Query:     query,
-		Arguments: []any{playerID},
+	const qend = `
+ ORDER BY player_class_zone_results.date DESC;
+	`
+	args := make([]any, 0, 1+len(zoneTypes)+len(tiers)+len(classes))
+	args = append(args, playerID)
+
+	inClauses := []inClause{
+		{
+			n:     len(zoneTypes),
+			field: "player_class_zone_results.zone_type",
+		},
+		{
+			n:     len(tiers),
+			field: "player_class_zone_results.tier",
+		},
+		{
+			n:     len(classes),
+			field: "player_class_zone_results.class",
+		},
 	}
+
+	inClause := buildInClauses(inClauses)
+
+	for _, zt := range zoneTypes {
+		args = append(args, zt)
+	}
+
+	for _, t := range tiers {
+		args = append(args, t)
+	}
+
+	for _, c := range classes {
+		args = append(args, c)
+	}
+
+	param := gorqlite.ParameterizedStatement{
+		Query:     qstart + inClause + qend,
+		Arguments: args,
+	}
+
+	fmt.Println(param.Query)
 
 	dbresults, err := db.conn.QueryOneParameterizedContext(ctx, param)
 	if err != nil {
@@ -770,6 +805,35 @@ DO UPDATE SET
 	return nil
 }
 
+type inClause struct {
+	n     int
+	field string
+}
+
+func buildInClauses(clauses []inClause) string {
+	var s strings.Builder
+	n := len(clauses) - 1
+	for i, c := range clauses {
+		s.Write([]byte(c.field))
+		s.WriteString(" IN (")
+		for j := 0; j < c.n; j++ {
+			if j == 0 {
+				s.Write([]byte("?"))
+			} else {
+				s.Write([]byte(",?"))
+			}
+		}
+
+		if i == n {
+			s.WriteString(")")
+		} else {
+			s.WriteString(") AND ")
+		}
+	}
+
+	return s.String()
+}
+
 func (db *DB) GetPlayerClassZoneResults(ctx context.Context, playerID uint64, zoneTypes []string, tiers, classes []uint8) ([]completionstore.PlayerClassZoneResult, bool, error) {
 	// TODO: probably don't need custom name, tier, duration, date, rank; just need to know if it was completed for the completions page
 	const qStart = `
@@ -799,47 +863,39 @@ WHERE
 `
 
 	args := make([]any, 0, 1+len(zoneTypes)+len(tiers)+len(classes))
-
-	var whereClause strings.Builder
-
 	args = append(args, playerID)
 
-	whereClause.WriteString("zone_class_info.zone_type IN (")
-	for i, zt := range zoneTypes {
-		if i == 0 {
-			whereClause.Write([]byte("?"))
-		} else {
-			whereClause.Write([]byte(",?"))
-		}
+	inClauses := []inClause{
+		{
+			n:     len(zoneTypes),
+			field: "zone_class_info.zone_type",
+		},
+		{
+			n:     len(tiers),
+			field: "zone_class_info.tier",
+		},
+		{
+			n:     len(classes),
+			field: "zone_class_info.class",
+		},
+	}
 
+	whereClause := buildInClauses(inClauses)
+
+	for _, zt := range zoneTypes {
 		args = append(args, zt)
 	}
-	whereClause.WriteString(") AND ")
 
-	whereClause.WriteString("zone_class_info.tier IN (")
-	for i, t := range tiers {
-		if i == 0 {
-			whereClause.Write([]byte("?"))
-		} else {
-			whereClause.Write([]byte(",?"))
-		}
+	for _, t := range tiers {
 		args = append(args, t)
 	}
-	whereClause.WriteString(") AND ")
 
-	whereClause.WriteString("zone_class_info.class IN (")
-	for i, c := range classes {
-		if i == 0 {
-			whereClause.Write([]byte("?"))
-		} else {
-			whereClause.Write([]byte(",?"))
-		}
+	for _, c := range classes {
 		args = append(args, c)
 	}
-	whereClause.WriteString(");")
 
 	param := gorqlite.ParameterizedStatement{
-		Query:     qStart + whereClause.String(),
+		Query:     qStart + whereClause + ";",
 		Arguments: args,
 	}
 

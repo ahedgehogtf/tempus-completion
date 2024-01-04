@@ -87,9 +87,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 }
 
 type Store interface {
+	GetPlayerResults(ctx context.Context, playerID uint64, zoneTypes []string, tiers, classes []uint8) ([]completionstore.PlayerClassZoneResult, bool, error)
 	GetPlayerMapClassResults(ctx context.Context, playerID, mapID uint64, class tempushttp.ClassType) ([]completionstore.PlayerClassZoneResult, bool, error)
 	GetPlayerRecentResults(ctx context.Context, playerID uint64) ([]completionstore.PlayerClassZoneResult, bool, error)
-	GetPlayerResults(ctx context.Context, playerID uint64) ([]completionstore.PlayerClassZoneResult, bool, error)
 	GetPlayerBySteamID(ctx context.Context, steamID string) (uint64, bool, error)
 	GetPlayerClassZoneResults(ctx context.Context, playerID uint64, zoneTypes []string, tiers, classes []uint8) ([]completionstore.PlayerClassZoneResult, bool, error)
 }
@@ -339,22 +339,12 @@ func (h *Handler) serveResultsPage(w http.ResponseWriter, r *http.Request) error
 		return httpserveutil.BadRequest(w, "malformed playerID: %w", err)
 	}
 
-	ctx := r.Context()
+	zoneTypes := q["zone-type"]
 
-	results, ok, err := h.store.GetPlayerResults(ctx, playerID)
-	if err != nil {
-		return httpserveutil.InternalError(w, "get completions: %w", err)
+	if len(zoneTypes) == 0 {
+		zoneTypes = []string{"map", "course", "bonus"}
 	}
 
-	if !ok {
-		if err := h.templates.index.Execute(w, nil); err != nil {
-			return fmt.Errorf("execute template: %w", err)
-		}
-
-		return nil
-	}
-
-	// TODO: use bitmask for filters, too
 	type pageFilters struct {
 		Tier1Checked         bool
 		Tier2Checked         bool
@@ -373,6 +363,97 @@ func (h *Handler) serveResultsPage(w http.ResponseWriter, r *http.Request) error
 		Measurement          string
 	}
 
+	var pf pageFilters
+
+	for _, v := range zoneTypes {
+		switch v {
+		case "map":
+			pf.MapZoneChecked = true
+		case "course":
+			pf.CourseZoneChecked = true
+		case "bonus":
+			pf.BonusZoneChecked = true
+		case "trick":
+			pf.TrickZoneChecked = true
+		default:
+			return httpserveutil.BadRequest(w, "zone-type '%s' is not supported", v)
+		}
+	}
+
+	tiers := q["tier"]
+	queryTiers := make([]uint8, 0, len(tiers))
+
+	if len(tiers) == 0 {
+		tiers = []string{"t1", "t2", "t3", "t4", "t5", "t6"}
+	}
+
+	for _, v := range tiers {
+		switch v {
+		case "t1":
+			queryTiers = append(queryTiers, 1)
+			pf.Tier1Checked = true
+		case "t2":
+			queryTiers = append(queryTiers, 2)
+			pf.Tier2Checked = true
+		case "t3":
+			queryTiers = append(queryTiers, 3)
+			pf.Tier3Checked = true
+		case "t4":
+			queryTiers = append(queryTiers, 4)
+			pf.Tier4Checked = true
+		case "t5":
+			queryTiers = append(queryTiers, 5)
+			pf.Tier5Checked = true
+		case "t6":
+			queryTiers = append(queryTiers, 6)
+			pf.Tier6Checked = true
+		default:
+			return httpserveutil.BadRequest(w, "tier '%s' is not supported", v)
+		}
+	}
+
+	classes := q["class"]
+	var queryClasses []uint8
+
+	switch len(classes) {
+	case 2, 0:
+		pf.SoldierChecked = true
+		pf.DemomanChecked = true
+
+		queryClasses = []uint8{3, 4}
+
+	case 1:
+		switch classes[0] {
+		case "soldier":
+			pf.SoldierChecked = true
+
+			queryClasses = []uint8{3}
+		case "demoman":
+			pf.DemomanChecked = true
+
+			queryClasses = []uint8{4}
+		default:
+			return httpserveutil.BadRequest(w, "class '%s' is not supported", classes[0])
+		}
+	default:
+		return httpserveutil.BadRequest(w, "must specify 1 or 2 classes")
+	}
+
+	ctx := r.Context()
+
+	results, ok, err := h.store.GetPlayerResults(ctx, playerID, zoneTypes, queryTiers, queryClasses)
+	if err != nil {
+		return httpserveutil.InternalError(w, "get completions: %w", err)
+	}
+
+	if !ok {
+		if err := h.templates.index.Execute(w, nil); err != nil {
+			return fmt.Errorf("execute template: %w", err)
+		}
+
+		return nil
+	}
+
 	type pageData struct {
 		Results  []completionstore.PlayerClassZoneResult
 		PlayerID uint64
@@ -382,7 +463,7 @@ func (h *Handler) serveResultsPage(w http.ResponseWriter, r *http.Request) error
 	d := pageData{
 		PlayerID: playerID,
 		Results:  results,
-		Filters:  pageFilters{},
+		Filters:  pf,
 	}
 
 	if err := h.templates.playerResults.Execute(w, d); err != nil {
@@ -621,44 +702,37 @@ func (h *Handler) serveCompletionsPage(w http.ResponseWriter, r *http.Request) e
 		Measurement          string
 	}
 
-	var includeTiers completionstore.Bitmask
+	var pf pageFilters
 
 	tiers := q["tier"]
+	queryTiers := make([]uint8, 0, len(tiers))
 
 	if len(tiers) == 0 {
 		tiers = []string{"t1", "t2", "t3", "t4", "t5", "t6"}
 	}
 
-	queryTiers := make([]uint8, 0, len(tiers))
-
-	var pf pageFilters
-
 	for _, v := range tiers {
 		switch v {
 		case "t1":
 			queryTiers = append(queryTiers, 1)
-			includeTiers = completionstore.Set(includeTiers, completionstore.T1)
 			pf.Tier1Checked = true
 		case "t2":
 			queryTiers = append(queryTiers, 2)
-			includeTiers = completionstore.Set(includeTiers, completionstore.T2)
 			pf.Tier2Checked = true
 		case "t3":
 			queryTiers = append(queryTiers, 3)
-			includeTiers = completionstore.Set(includeTiers, completionstore.T3)
 			pf.Tier3Checked = true
 		case "t4":
 			queryTiers = append(queryTiers, 4)
-			includeTiers = completionstore.Set(includeTiers, completionstore.T4)
 			pf.Tier4Checked = true
 		case "t5":
 			queryTiers = append(queryTiers, 5)
-			includeTiers = completionstore.Set(includeTiers, completionstore.T5)
 			pf.Tier5Checked = true
 		case "t6":
 			queryTiers = append(queryTiers, 6)
-			includeTiers = completionstore.Set(includeTiers, completionstore.T6)
 			pf.Tier6Checked = true
+		default:
+			return httpserveutil.BadRequest(w, "tier '%s' is not supported", v)
 		}
 	}
 
@@ -686,7 +760,6 @@ func (h *Handler) serveCompletionsPage(w http.ResponseWriter, r *http.Request) e
 	hideCompleted := q.Get("hide-completed") == "true"
 	pf.HideCompletedChecked = hideCompleted
 
-	classes := q["class"]
 	sortType := q.Get("sort")
 
 	sfk := sortFuncsKey{
@@ -695,6 +768,7 @@ func (h *Handler) serveCompletionsPage(w http.ResponseWriter, r *http.Request) e
 
 	pf.Sort = sortType
 
+	classes := q["class"]
 	var queryClasses []uint8
 
 	switch len(classes) {
@@ -718,6 +792,8 @@ func (h *Handler) serveCompletionsPage(w http.ResponseWriter, r *http.Request) e
 			pf.DemomanChecked = true
 
 			queryClasses = []uint8{4}
+		default:
+			return httpserveutil.BadRequest(w, "class '%s' is not supported", classes[0])
 		}
 	default:
 		return httpserveutil.BadRequest(w, "must specify 1 or 2 classes")
