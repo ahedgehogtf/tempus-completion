@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"embed"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -106,7 +109,31 @@ var (
 )
 
 func (h *Handler) serveIndexPage(w http.ResponseWriter, r *http.Request) error {
-	if err := h.templates.index.Execute(w, nil); err != nil {
+	type pageData struct {
+		RecentPlayers recentPlayersCookie
+	}
+
+	var recentPlayers recentPlayersCookie
+
+	if _, err := unmarshalRecentPlayersCookie(r, &recentPlayers); err != nil {
+		c := &http.Cookie{
+			Name:     recentPlayersCookieName,
+			Value:    "",
+			Path:     "/",
+			Expires:  time.Time{},
+			HttpOnly: true,
+		}
+
+		http.SetCookie(w, c)
+	}
+
+	slices.Reverse(recentPlayers.Players)
+
+	data := pageData{
+		RecentPlayers: recentPlayers,
+	}
+
+	if err := h.templates.index.Execute(w, data); err != nil {
 		return fmt.Errorf("execute template: %w", err)
 	}
 
@@ -167,7 +194,63 @@ func (h *Handler) serveSearchResultsPage(w http.ResponseWriter, r *http.Request)
 	return nil
 }
 
+type recentPlayersCookie struct {
+	Players []recentPlayersCookiePlayer `json:"players"`
+}
+
+type recentPlayersCookiePlayer struct {
+	Name     string `json:"name"`
+	PlayerID uint64 `json:"player_id"`
+}
+
+const recentPlayersCookieName = "recent-players"
+
+func unmarshalRecentPlayersCookie(r *http.Request, recentPlayers *recentPlayersCookie) (*http.Cookie, error) {
+	cookie, err := r.Cookie(recentPlayersCookieName)
+	if err != nil {
+		if errors.Is(err, http.ErrNoCookie) {
+			c := &http.Cookie{
+				Name:     recentPlayersCookieName,
+				Value:    "",
+				Path:     "/",
+				Secure:   false,
+				HttpOnly: false,
+			}
+
+			return c, nil
+		}
+
+		return nil, fmt.Errorf("parse cookie: %w", err)
+	}
+
+	b, err := base64.URLEncoding.DecodeString(cookie.Value)
+	if err != nil {
+		return nil, fmt.Errorf("base64 decode: %w", err)
+	}
+
+	if err := json.Unmarshal(b, recentPlayers); err != nil {
+		return nil, fmt.Errorf("json unmarshal: %w", err)
+	}
+
+	return cookie, nil
+}
+
 func (h *Handler) servePlayerPage(w http.ResponseWriter, r *http.Request) error {
+	var recentPlayers recentPlayersCookie
+
+	cookie, err := unmarshalRecentPlayersCookie(r, &recentPlayers)
+	if err != nil {
+		cookie = &http.Cookie{
+			Name:     recentPlayersCookieName,
+			Value:    "",
+			Path:     "/",
+			Expires:  time.Time{},
+			HttpOnly: true,
+		}
+
+		http.SetCookie(w, cookie)
+	}
+
 	q := r.URL.Query()
 
 	pid := q.Get("playerid")
@@ -185,6 +268,30 @@ func (h *Handler) servePlayerPage(w http.ResponseWriter, r *http.Request) error 
 	stats, err := h.client.GetPlayerStats(ctx, playerID)
 	if err != nil {
 		return httpserveutil.BadRequest(w, "search players and maps: %w", err)
+	}
+
+	{
+		rp := recentPlayersCookiePlayer{
+			Name:     stats.PlayerInfo.Name,
+			PlayerID: playerID,
+		}
+
+		var found bool
+
+		for i, p := range recentPlayers.Players {
+			if p.PlayerID == playerID {
+				recentPlayers.Players[i] = rp
+				found = true
+			}
+		}
+
+		if !found {
+			recentPlayers.Players = append(recentPlayers.Players, rp)
+
+			if len(recentPlayers.Players) > 4 {
+				recentPlayers.Players = recentPlayers.Players[1:]
+			}
+		}
 	}
 
 	steamID64, err := steamidutil.IDToInt64(stats.PlayerInfo.SteamID)
@@ -231,6 +338,14 @@ func (h *Handler) servePlayerPage(w http.ResponseWriter, r *http.Request) error 
 		DemomanTitleColor: "var(--text-color)",
 		RecentResults:     results,
 	}
+
+	b, err := json.Marshal(recentPlayers)
+	if err != nil {
+		return httpserveutil.InternalError(w, "marshal recent players: %w", err)
+	}
+
+	cookie.Value = base64.URLEncoding.EncodeToString(b)
+	http.SetCookie(w, cookie)
 
 	if err := h.templates.player.Execute(w, data); err != nil {
 		return fmt.Errorf("execute template: %w", err)
