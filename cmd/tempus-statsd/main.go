@@ -276,22 +276,21 @@ func (h *Handler) servePlayerPage(w http.ResponseWriter, r *http.Request) error 
 			PlayerID: playerID,
 		}
 
-		var found bool
+		players := make([]recentPlayersCookiePlayer, 0, 5)
 
-		for i, p := range recentPlayers.Players {
+		for _, p := range recentPlayers.Players {
 			if p.PlayerID == playerID {
-				recentPlayers.Players[i] = rp
-				found = true
+				continue
 			}
+
+			players = append(players, p)
+		}
+		players = append(players, rp)
+		if len(players) > 4 {
+			players = players[1:]
 		}
 
-		if !found {
-			recentPlayers.Players = append(recentPlayers.Players, rp)
-
-			if len(recentPlayers.Players) > 4 {
-				recentPlayers.Players = recentPlayers.Players[1:]
-			}
-		}
+		recentPlayers.Players = players
 	}
 
 	steamID64, err := steamidutil.IDToInt64(stats.PlayerInfo.SteamID)
