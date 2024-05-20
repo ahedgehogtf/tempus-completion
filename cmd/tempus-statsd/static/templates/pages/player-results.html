@@ -26,6 +26,8 @@
     <option value="duration-descending" {{ if eq .Filters.Sort "duration-descending" }} selected {{end}}>Highest duration</option>
     <option value="rank-ascending" {{ if eq .Filters.Sort "rank-ascending" }} selected {{end}}>Best rank</option>
     <option value="rank-descending" {{ if eq .Filters.Sort "rank-descending" }} selected {{end}}>Worst rank</option>
+    <option value="rank-percentile-ascending" {{ if eq .Filters.Sort "rank-percentile-ascending" }} selected {{end}}>Best rank percentile</option>
+    <option value="rank-percentile-descending" {{ if eq .Filters.Sort "rank-percentile-descending" }} selected {{end}}>Worst rank percentile</option>
   </select>
 </fieldset>
 <fieldset style="border: none;">

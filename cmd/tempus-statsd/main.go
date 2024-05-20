@@ -817,6 +817,8 @@ var (
 		"date-descending":             SortDateDescendingResults,
 		"rank-ascending":              SortRankAscendingResults,
 		"rank-descending":             SortRankDescendingResults,
+		"rank-percentile-ascending":   SortRankPercentileAscendingResults,
+		"rank-percentile-descending":  SortRankPercentileDescendingResults,
 	}
 )
 
@@ -877,6 +879,46 @@ func SortRankAscendingResults(results []completionstore.PlayerClassZoneResult) {
 func SortRankDescendingResults(results []completionstore.PlayerClassZoneResult) {
 	sort.SliceStable(results, func(i, j int) bool {
 		return results[i].Rank > results[j].Rank
+	})
+}
+
+func SortRankPercentileAscendingResults(results []completionstore.PlayerClassZoneResult) {
+	sort.SliceStable(results, func(i, j int) bool {
+		ra := float64(results[i].Rank)
+		rb := float64(results[j].Rank)
+
+		ca := float64(results[i].Completions)
+		cb := float64(results[j].Completions)
+
+		if ca == 0 {
+			return false
+		}
+
+		if cb == 0 {
+			return true
+		}
+
+		return (ra / ca) < (rb / cb)
+	})
+}
+
+func SortRankPercentileDescendingResults(results []completionstore.PlayerClassZoneResult) {
+	sort.SliceStable(results, func(i, j int) bool {
+		ra := float64(results[i].Rank)
+		rb := float64(results[j].Rank)
+
+		ca := float64(results[i].Completions)
+		cb := float64(results[j].Completions)
+
+		if ca == 0 {
+			return true
+		}
+
+		if cb == 0 {
+			return false
+		}
+
+		return (ra / ca) > (rb / cb)
 	})
 }
 
