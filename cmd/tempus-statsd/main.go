@@ -20,6 +20,7 @@ import (
 	"tempus-completion/cmd/tempus-completion-fetcher/completionstore"
 	"tempus-completion/cmd/tempus-completion-fetcher/rqlitecompletionstore"
 	"tempus-completion/cmd/tempus-statsd/httpserveutil"
+	"tempus-completion/cmd/tempus-statsd/statsdhttp"
 	"tempus-completion/cmd/tempus-statsd/templateutil"
 	"tempus-completion/steamidutil"
 	"tempus-completion/tempushttp"
@@ -591,20 +592,41 @@ func (h *Handler) serveResultsPage(w http.ResponseWriter, r *http.Request) error
 		sf(results)
 	}
 
-	type pageData struct {
-		Results  []completionstore.PlayerClassZoneResult
-		PlayerID uint64
-		Filters  pageFilters
-	}
+	format := q.Get("format")
 
-	d := pageData{
-		PlayerID: playerID,
-		Results:  results,
-		Filters:  pf,
-	}
+	switch format {
+	case "json":
+		resultshttp := make([]statsdhttp.PlayerClassZoneResult, 0, len(results))
 
-	if err := h.templates.playerResults.Execute(w, d); err != nil {
-		return fmt.Errorf("execute template: %w", err)
+		for _, r := range results {
+			resultshttp = append(resultshttp, playerClassZoneResultToHTTP(r))
+		}
+
+		response := statsdhttp.ResultsResponse{
+			Results: resultshttp,
+		}
+
+		enc := json.NewEncoder(w)
+
+		if err := enc.Encode(response); err != nil {
+			return fmt.Errorf("encode response: %w", err)
+		}
+	default:
+		type pageData struct {
+			Results  []completionstore.PlayerClassZoneResult
+			PlayerID uint64
+			Filters  pageFilters
+		}
+
+		d := pageData{
+			PlayerID: playerID,
+			Results:  results,
+			Filters:  pf,
+		}
+
+		if err := h.templates.playerResults.Execute(w, d); err != nil {
+			return fmt.Errorf("execute template: %w", err)
+		}
 	}
 
 	return nil
@@ -1087,23 +1109,94 @@ func (h *Handler) serveCompletionsPage(w http.ResponseWriter, r *http.Request) e
 
 	pf.Measurement = measurement
 
-	type pageData struct {
-		PlayerID uint64
-		Filters  pageFilters
-		Stats    []completionstats.PlayerMapResultStats
-	}
+	format := q.Get("format")
 
-	d := pageData{
-		PlayerID: playerID,
-		Filters:  pf,
-		Stats:    stats,
-	}
+	switch format {
+	case "json":
+		statshttp := make([]statsdhttp.PlayerMapResultStats, 0, len(stats))
 
-	if err := h.templates.completions.Execute(w, d); err != nil {
-		return fmt.Errorf("execute template: %w", err)
+		for _, s := range stats {
+			statshttp = append(statshttp, playerMapResultStatsToHTTP(s))
+		}
+
+		response := statsdhttp.CompletionsResponse{
+			Stats: statshttp,
+		}
+
+		enc := json.NewEncoder(w)
+
+		if err := enc.Encode(response); err != nil {
+			return fmt.Errorf("encode response: %w", err)
+		}
+	default:
+		type pageData struct {
+			PlayerID uint64
+			Filters  pageFilters
+			Stats    []completionstats.PlayerMapResultStats
+		}
+
+		d := pageData{
+			PlayerID: playerID,
+			Filters:  pf,
+			Stats:    stats,
+		}
+
+		if err := h.templates.completions.Execute(w, d); err != nil {
+			return fmt.Errorf("execute template: %w", err)
+		}
 	}
 
 	return nil
+}
+
+func playerMapResultStatsToHTTP(stats completionstats.PlayerMapResultStats) statsdhttp.PlayerMapResultStats {
+	return statsdhttp.PlayerMapResultStats{
+		MapID:   stats.MapID,
+		MapName: stats.MapName,
+		Demoman: playerClassMapResultStatsToHTTP(stats.Demoman),
+		Soldier: playerClassMapResultStatsToHTTP(stats.Soldier),
+	}
+}
+
+func playerClassMapResultStatsToHTTP(stats completionstats.PlayerClassMapResultStats) statsdhttp.CompletionsPlayerClassMapResultStats {
+	results := make([]statsdhttp.PlayerClassZoneResult, 0, len(stats.Results))
+
+	for _, r := range stats.Results {
+		rhttp := playerClassZoneResultToHTTP(r)
+
+		results = append(results, rhttp)
+	}
+
+	return statsdhttp.CompletionsPlayerClassMapResultStats{
+		PointsTotal:              stats.PointsTotal,
+		ZonesTotal:               stats.ZonesTotal,
+		PointsFinished:           stats.PointsFinished,
+		ZonesFinished:            stats.ZonesFinished,
+		PointsFinishedPercentage: stats.PointsFinishedPercentage,
+		ZonesFinishedPercentage:  stats.ZonesFinishedPercentage,
+		MostPopularCompletions:   stats.MostPopularCompletions,
+		LeastPopularCompletions:  stats.LeastPopularCompletions,
+		CompletionsCount:         stats.CompletionsCount,
+		Tiers:                    uint8(stats.Tiers),
+		Results:                  results,
+	}
+}
+
+func playerClassZoneResultToHTTP(result completionstore.PlayerClassZoneResult) statsdhttp.PlayerClassZoneResult {
+	return statsdhttp.PlayerClassZoneResult{
+		MapID:       result.MapID,
+		ZoneType:    string(result.ZoneType),
+		ZoneIndex:   result.ZoneIndex,
+		PlayerID:    result.PlayerID,
+		Class:       uint8(result.Class),
+		CustomName:  result.CustomName,
+		MapName:     result.MapName,
+		Tier:        result.Tier,
+		Rank:        result.Rank,
+		Duration:    int64(result.Duration),
+		Date:        result.Date.UnixMilli(),
+		Completions: result.Completions,
+	}
 }
 
 func (h *Handler) Routes(out io.Writer) map[string]http.Handler {
