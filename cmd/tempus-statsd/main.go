@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"slices"
@@ -55,10 +56,6 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("-rqlite-address must be set")
 	}
 
-	// ctx := context.Background()
-	// ctx, cancel := signal.NotifyContext(ctx, syscall.SIGQUIT, syscall.SIGKILL, syscall.SIGTERM)
-	// defer cancel()
-
 	mux := http.NewServeMux()
 
 	pt, err := parseTemplates()
@@ -83,7 +80,27 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 	httpserveutil.Register(mux, stdout, h)
 
-	if err := http.ListenAndServe(":9876", mux); err != nil {
+	ip := "0.0.0.0"
+	port := "9876"
+	addr := fmt.Sprintf("[%s]:%s", ip, port)
+
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadTimeout:       0,
+		ReadHeaderTimeout: 0,
+		WriteTimeout:      0,
+		IdleTimeout:       0,
+	}
+
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+
+	fmt.Fprintf(stdout, "Listening on tcp at %s\n", listener.Addr().String())
+
+	if err := server.Serve(listener); err != nil {
 		return fmt.Errorf("listen and serve: %w", err)
 	}
 
