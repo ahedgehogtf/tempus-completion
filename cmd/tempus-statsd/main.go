@@ -42,10 +42,14 @@ func run(args []string, stdout, stderr io.Writer) error {
 	var rqliteaddr string
 	var certpath string
 	var keypath string
+	var port string
+	var address string
 
 	flags.StringVar(&rqliteaddr, "rqlite-address", "", "")
 	flags.StringVar(&certpath, "cert", "", "")
 	flags.StringVar(&keypath, "key", "", "")
+	flags.StringVar(&port, "port", "9876", "")
+	flags.StringVar(&address, "address", "0.0.0.0", "")
 
 	ok, err := ParseArgs(flags, args, stderr, "")
 	if err != nil {
@@ -84,9 +88,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 	httpserveutil.Register(mux, stdout, h)
 
-	ip := "0.0.0.0"
-	port := "9876"
-	addr := fmt.Sprintf("[%s]:%s", ip, port)
+	addr := fmt.Sprintf("[%s]:%s", address, port)
 
 	server := &http.Server{
 		Addr:              addr,
