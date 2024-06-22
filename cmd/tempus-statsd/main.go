@@ -40,8 +40,12 @@ func run(args []string, stdout, stderr io.Writer) error {
 	flags := NewFlagSet("statsd")
 
 	var rqliteaddr string
+	var certpath string
+	var keypath string
 
 	flags.StringVar(&rqliteaddr, "rqlite-address", "", "")
+	flags.StringVar(&certpath, "cert", "", "")
+	flags.StringVar(&keypath, "key", "", "")
 
 	ok, err := ParseArgs(flags, args, stderr, "")
 	if err != nil {
@@ -98,10 +102,18 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("listen: %w", err)
 	}
 
-	fmt.Fprintf(stdout, "Listening on tcp at %s\n", listener.Addr().String())
+	if certpath != "" && keypath != "" {
+		fmt.Fprintf(stdout, "Listening on tcp with tls at %s\n", listener.Addr().String())
 
-	if err := server.Serve(listener); err != nil {
-		return fmt.Errorf("listen and serve: %w", err)
+		if err := server.ServeTLS(listener, certpath, keypath); err != nil {
+			return fmt.Errorf("listen and serve tls: %w", err)
+		}
+	} else {
+		fmt.Fprintf(stdout, "Listening on tcp at %s\n", listener.Addr().String())
+
+		if err := server.Serve(listener); err != nil {
+			return fmt.Errorf("listen and serve: %w", err)
+		}
 	}
 
 	return nil
