@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"embed"
 	"encoding/base64"
@@ -49,7 +50,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	flags.StringVar(&certpath, "cert", "", "")
 	flags.StringVar(&keypath, "key", "", "")
 	flags.StringVar(&port, "port", "9876", "")
-	flags.StringVar(&address, "address", "0.0.0.0", "")
+	flags.StringVar(&address, "address", cmp.Or(os.Getenv("LISTEN_ADDRESS"), "0.0.0.0"), "")
 
 	ok, err := ParseArgs(flags, args, stderr, "")
 	if err != nil {
