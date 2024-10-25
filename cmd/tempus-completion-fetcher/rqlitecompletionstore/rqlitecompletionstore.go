@@ -1098,6 +1098,11 @@ WHERE
 				return nil, fmt.Errorf("scan results: %w", err)
 			}
 
+			// TODO: figure out better place for this
+			if tier == 0 {
+				continue
+			}
+
 			pm := completionstore.PlayerMap{
 				PlayerID: uint64(playerID),
 				MapID:    uint64(mapID),
